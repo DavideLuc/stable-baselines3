@@ -46,6 +46,13 @@ class ReplayBufferSamples(NamedTuple):
     dones: th.Tensor
     rewards: th.Tensor
 
+class ReplayBufferSamplesExt(NamedTuple):
+    observations: th.Tensor
+    actions: th.Tensor
+    next_observations: th.Tensor
+    dones: th.Tensor
+    rewards: th.Tensor
+    hiddens: th.Tensor
 
 class DictReplayBufferSamples(ReplayBufferSamples):
     observations: TensorDict

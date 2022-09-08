@@ -511,6 +511,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             reward_,
             dones,
             infos,
+            hidden
         )
 
         self._last_obs = new_obs
