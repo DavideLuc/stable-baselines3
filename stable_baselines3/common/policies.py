@@ -337,8 +337,12 @@ class BasePolicy(BaseModel):
         with th.no_grad():
             actions = self._predict(observation, deterministic=deterministic)
         # Convert to numpy, and reshape to the original action shape
+        print("shape before", actions.shape)
         actions = actions.cpu().numpy().reshape((-1,) + self.action_space.shape)
-
+        print("shape after", actions.shape)
+        #todo
+        # print("shape state before", state.shape)
+        # state = state.cpu().numpy().reshape((-1,))
         if isinstance(self.action_space, gym.spaces.Box):
             if self.squash_output:
                 # Rescale to proper domain when using squashing

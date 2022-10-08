@@ -11,7 +11,7 @@ import numpy as np
 import torch as th
 
 from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.buffers import DictReplayBuffer, ReplayBuffer
+from stable_baselines3.common.buffers import DictReplayBuffer, ReplayBuffer, ReplayBufferExt
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.noise import ActionNoise, VectorizedActionNoise
 from stable_baselines3.common.policies import BasePolicy
@@ -397,6 +397,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             and scaled action that will be stored in the replay buffer.
             The two differs when the action space is not normalized (bounds are not [-1, 1]).
         """
+        hidden = None
         # Select action randomly or according to policy
         if self.num_timesteps < learning_starts and not (self.use_sde and self.use_sde_at_warmup):
             # Warmup phase
@@ -405,7 +406,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # Note: when using continuous actions,
             # we assume that the policy uses tanh to scale the action
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
-            unscaled_action, _ = self.predict(self._last_obs, deterministic=False)
+            unscaled_action,_ = self.predict(self._last_obs, deterministic=False)
 
         # Rescale the action from [low, high] to [-1, 1]
         if isinstance(self.action_space, gym.spaces.Box):
@@ -418,6 +419,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # We store the scaled action in the buffer
             buffer_action = scaled_action
             action = self.policy.unscale_action(scaled_action)
+            if isinstance(self.replay_buffer, ReplayBufferExt):
+                return action, buffer_action, hidden
         else:
             # Discrete case, no need to normalize or clip
             buffer_action = unscaled_action
@@ -461,6 +464,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         reward: np.ndarray,
         dones: np.ndarray,
         infos: List[Dict[str, Any]],
+        hidden: th.Tensor = None,
     ) -> None:
         """
         Store transition in the replay buffer.
@@ -504,15 +508,26 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                     if self._vec_normalize_env is not None:
                         next_obs[i] = self._vec_normalize_env.unnormalize_obs(next_obs[i, :])
 
-        replay_buffer.add(
-            self._last_original_obs,
-            next_obs,
-            buffer_action,
-            reward_,
-            dones,
-            infos,
-            hidden
-        )
+        if isinstance(self.replay_buffer, ReplayBufferExt):
+            # print("add on extended buffer")
+            replay_buffer.add(
+                self._last_original_obs,
+                next_obs,
+                buffer_action,
+                reward_,
+                dones,
+                infos,
+                hidden
+            )
+        else:
+            replay_buffer.add(
+                self._last_original_obs,
+                next_obs,
+                buffer_action,
+                reward_,
+                dones,
+                infos,
+            )
 
         self._last_obs = new_obs
         # Save the unnormalized observation
@@ -575,7 +590,10 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 self.actor.reset_noise(env.num_envs)
 
             # Select action randomly or according to policy
-            actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs)
+            if isinstance(self.replay_buffer, ReplayBufferExt):
+                actions, buffer_actions, hidden = self._sample_action(learning_starts, action_noise, env.num_envs)
+            else:
+                actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs)
 
             # Rescale and perform action
             new_obs, rewards, dones, infos = env.step(actions)
@@ -593,7 +611,10 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             self._update_info_buffer(infos, dones)
 
             # Store data in replay buffer (normalized action and unnormalized observation)
-            self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos)
+            if isinstance(self.replay_buffer, ReplayBufferExt):
+                self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos,hidden=hidden)
+            else:
+                self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos)
 
             self._update_current_progress_remaining(self.num_timesteps, self._total_timesteps)
 
