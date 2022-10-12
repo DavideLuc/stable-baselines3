@@ -12,6 +12,7 @@ from stable_baselines3.common.torch_layers import (
     BaseFeaturesExtractor,
     CombinedExtractor,
     FlattenExtractor,
+    RNNFlattenExtractor,
     NatureCNN,
     create_mlp,
     get_actor_critic_arch,
@@ -160,7 +161,7 @@ class Actor(BasePolicy):
             Mean, standard deviation and optional keyword arguments.
         """
         #todo remove print
-        print("obs shape: ", obs.shape)
+        print("(actor)obs shape: ", obs.shape)
         features = self.extract_features(obs)
         latent_pi = self.latent_pi(features)
         mean_actions = self.mu(latent_pi)
@@ -585,17 +586,17 @@ class ActorRnn(BasePolicy):
         #   OLD mlp policy
         # latent_pi_net = create_mlp(features_dim, -1, net_arch, activation_fn)
         # self.latent_pi = nn.Sequential(*latent_pi_net)
-        #todo
-        input_size=301
+        #todo parametrizzare
         hidden_dim=10
         n_layers=2
         output_size=256
-        self.latent_pi = RNN(input_size,output_size,hidden_dim,n_layers)
+        self.latent_pi = RNN(features_dim,output_size,hidden_dim,n_layers)
 
 
         last_layer_dim = net_arch[-1] if len(net_arch) > 0 else features_dim
 
         if self.use_sde:
+            print("using sde")
             self.action_dist = StateDependentNoiseDistribution(
                 action_dim, full_std=full_std, use_expln=use_expln, learn_features=True, squash_output=True
             )
@@ -653,7 +654,7 @@ class ActorRnn(BasePolicy):
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), msg
         self.action_dist.sample_weights(self.log_std, batch_size=batch_size)
 
-    def get_action_dist_params(self, obs: th.Tensor) -> Tuple[th.Tensor, th.Tensor, Dict[str, th.Tensor]]:
+    def get_action_dist_params(self, obs: th.Tensor, hidden: th.Tensor) -> Tuple[th.Tensor, th.Tensor, Dict[str, th.Tensor]]:
         """
         Get the parameters for the action distribution.
 
@@ -661,15 +662,19 @@ class ActorRnn(BasePolicy):
         :return:
             Mean, standard deviation and optional keyword arguments.
         """
-        #todo capire cosa fare
-        hidden = None
-        print("obs shape:", obs.shape)
-        # features = self.extract_features(obs)
-        features = obs
-        print("feat shape:", features.shape)
-        latent_pi,hidden = self.latent_pi(features,hidden) #forward di RNN
-        mean_actions = self.mu(latent_pi)
+        #todo capire se ok feature extraction
 
+        # print("(actor rnn)obs shape:", obs.shape)
+        features = self.extract_features(obs)
+
+
+        print("(actor rnn)feat shape:", features.shape)
+        if hidden != None: print("(actor rnn)hidden:", hidden.shape)
+
+        print("hidden for rnn is:", hidden)
+        latent_pi,hidden = self.latent_pi(features,hidden) #forward di RNN
+
+        mean_actions = self.mu(latent_pi)
         if self.use_sde:
             return mean_actions, self.log_std, dict(latent_sde=latent_pi)
         # Unstructured exploration (Original implementation)
@@ -679,13 +684,20 @@ class ActorRnn(BasePolicy):
         return mean_actions, log_std, {}, hidden
 
     def forward(self, obs: th.Tensor, deterministic: bool = False) -> th.Tensor:
-        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs)
+        print("forward actor")
+        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,None)
+        print("mean acntion:", mean_actions)
+        print("forward actor done\n")
         # Note: the action is squashed
         return self.action_dist.actions_from_params(mean_actions, log_std, deterministic=deterministic, **kwargs), hidden
 
-    def action_log_prob(self, obs: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
-        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs)
+    def action_log_prob(self, obs: th.Tensor, oldHidden: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
+        print("log_prob actor")
+        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,oldHidden)
+        print("hidden:", hidden.shape)
         # return action and associated log prob
+        print("mean acntion:",mean_actions)
+        print("log_prob ok")
         return self.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs)
 
     def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
@@ -735,7 +747,7 @@ class RnnPolicy(BasePolicy):
         sde_net_arch: Optional[List[int]] = None,
         use_expln: bool = False,
         clip_mean: float = 2.0,
-        features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
+        features_extractor_class: Type[BaseFeaturesExtractor] = RNNFlattenExtractor,
         features_extractor_kwargs: Optional[Dict[str, Any]] = None,
         normalize_images: bool = True,
         optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
@@ -856,10 +868,14 @@ class RnnPolicy(BasePolicy):
         return ContinuousCritic(**critic_kwargs).to(self.device)
 
     def forward(self, obs: th.Tensor, deterministic: bool = False) -> th.Tensor:
+        #return self._predict(obs, state=state, deterministic=deterministic)
+        print("Rnnpolicy forward")
         return self._predict(obs, deterministic=deterministic)
 
     def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
-        return self.actor(observation, deterministic)
+        #return self.actor(observation, state=state, deterministic=deterministic)
+        print("Rnnpolicy predict")
+        return self.actor(observation, deterministic=deterministic) #call forward of RnnActor
 
     def set_training_mode(self, mode: bool) -> None:
         """
@@ -892,12 +908,20 @@ class RNN(nn.Module):
         # hidden (n_layers, batch_size, hidden_dim)
         # r_out (batch_size, time_step, hidden_size)
         print("x:", x.shape)
+        batch_size = x.size(0)
+        #todo check if reshape is ok
+        if hidden is not None:
+            hidden=hidden.reshape(2,256,10)
 
+        # print("in of GRU layer out:", x)
+        # print("in of GRU layer hidden:", hidden)
 
         # get RNN outputs
         r_out, hidden = self.rnn(x, hidden)
+        # print("out of GRU layer out:",r_out)
+        # print("out of GRU layer hidden:",hidden)
         # shape output to be (batch_size*seq_length, hidden_dim)
-        r_out = r_out.view(-1, self.hidden_dim)
+        r_out = r_out.reshape(-1, self.hidden_dim)
 
         # get final output
         output = self.fc(r_out)

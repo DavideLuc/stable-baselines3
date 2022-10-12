@@ -5,7 +5,7 @@ import numpy as np
 import torch as th
 from torch.nn import functional as F
 
-from stable_baselines3.common.buffers import ReplayBuffer
+from stable_baselines3.common.buffers import ReplayBuffer, ReplayBufferExt
 from stable_baselines3.common.noise import ActionNoise
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
 from stable_baselines3.common.policies import BasePolicy
@@ -208,12 +208,21 @@ class SAC(OffPolicyAlgorithm):
             # Sample replay buffer
             replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
 
+
             # We need to sample because `log_std` may have changed between two gradient steps
             if self.use_sde:
                 self.actor.reset_noise()
 
             # Action by the current actor for the sampled state
-            actions_pi, log_prob = self.actor.action_log_prob(replay_data.observations)
+            print("(sac) replay data obs: ", replay_data.observations.shape)
+
+            if isinstance(self.replay_buffer, ReplayBufferExt):
+                print("(sac) replay data hidden: ", replay_data.hiddens.shape)
+                print("sac launch log prog with ext buffer")
+                actions_pi, log_prob = self.actor.action_log_prob(replay_data.observations,replay_data.hiddens)
+            else:
+                print("launch log prog")
+                actions_pi, log_prob = self.actor.action_log_prob(replay_data.observations)
             log_prob = log_prob.reshape(-1, 1)
 
             ent_coef_loss = None
@@ -237,8 +246,15 @@ class SAC(OffPolicyAlgorithm):
                 self.ent_coef_optimizer.step()
 
             with th.no_grad():
-                # Select action according to policy
-                next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations)
+                if isinstance(self.replay_buffer, ReplayBufferExt):
+                    print("sac launch log prog with ext buffer for next action")
+                    next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations, replay_data.hiddens)
+                else:
+                    print("launch log progfor next action")
+                    next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations)
+                #on if before:
+                    # Select action according to policy
+                    # next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations)
                 # Compute the next Q values: min over all critics targets
                 next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)

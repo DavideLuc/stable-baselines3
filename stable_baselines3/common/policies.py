@@ -26,6 +26,7 @@ from stable_baselines3.common.torch_layers import (
     BaseFeaturesExtractor,
     CombinedExtractor,
     FlattenExtractor,
+    RNNFlattenExtractor,
     MlpExtractor,
     NatureCNN,
     create_mlp,
@@ -126,7 +127,8 @@ class BaseModel(nn.Module, ABC):
         """
         assert self.features_extractor is not None, "No features extractor was set"
         preprocessed_obs = preprocess_obs(obs, self.observation_space, normalize_images=self.normalize_images)
-        return self.features_extractor(preprocessed_obs)
+        print("(extrac feature)preprocessed", preprocessed_obs.shape)
+        return self.features_extractor(preprocessed_obs) #usa nn.flatten di default (torch layer line 35)
 
     def _get_constructor_parameters(self) -> Dict[str, Any]:
         """
@@ -330,19 +332,27 @@ class BasePolicy(BaseModel):
         # if episode_start is None:
         #     episode_start = [False for _ in range(self.n_envs)]
         # Switch to eval mode (this affects batch norm / dropout)
+
+        print("running predict common policcies")
         self.set_training_mode(False)
 
         observation, vectorized_env = self.obs_to_tensor(observation)
 
         with th.no_grad():
-            actions = self._predict(observation, deterministic=deterministic)
+            print("extractor class",self.features_extractor_class)
+            if (self.features_extractor_class==RNNFlattenExtractor): #todo condition for rnn
+                print("condition ok")
+                actions,state = self._predict(observation, deterministic=deterministic)
+                state = state.cpu().numpy()
+                print("shape state", state.shape)
+            else:
+                actions = self._predict(observation, deterministic=deterministic)
+        print("predict done\n")
         # Convert to numpy, and reshape to the original action shape
-        print("shape before", actions.shape)
         actions = actions.cpu().numpy().reshape((-1,) + self.action_space.shape)
-        print("shape after", actions.shape)
-        #todo
-        # print("shape state before", state.shape)
-        # state = state.cpu().numpy().reshape((-1,))
+
+        #todo (reshape è fatto su sac\policies RNN riga 913)
+
         if isinstance(self.action_space, gym.spaces.Box):
             if self.squash_output:
                 # Rescale to proper domain when using squashing

@@ -397,16 +397,22 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             and scaled action that will be stored in the replay buffer.
             The two differs when the action space is not normalized (bounds are not [-1, 1]).
         """
+        #todo define hidden state
         hidden = None
         # Select action randomly or according to policy
         if self.num_timesteps < learning_starts and not (self.use_sde and self.use_sde_at_warmup):
             # Warmup phase
-            unscaled_action = np.array([self.action_space.sample() for _ in range(n_envs)])
+            unscaled_action = np.array([self.action_space.sample() for _ in range(n_envs)])  #call sample that call the forward of actor
         else:
             # Note: when using continuous actions,
             # we assume that the policy uses tanh to scale the action
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
-            unscaled_action,_ = self.predict(self._last_obs, deterministic=False)
+            if isinstance(self.replay_buffer, ReplayBufferExt):
+                print("off policy sample action launch predict")
+                unscaled_action,hidden = self.predict(self._last_obs, deterministic=False)
+            else:
+                unscaled_action,_ = self.predict(self._last_obs, deterministic=False)
+
 
         # Rescale the action from [low, high] to [-1, 1]
         if isinstance(self.action_space, gym.spaces.Box):
@@ -530,6 +536,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             )
 
         self._last_obs = new_obs
+        # print("(store_transition) last_ops shape: ",self._last_obs.shape)
         # Save the unnormalized observation
         if self._vec_normalize_env is not None:
             self._last_original_obs = new_obs_

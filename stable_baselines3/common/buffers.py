@@ -310,7 +310,8 @@ class ReplayBuffer(BaseBuffer):
         else:
             next_obs = self._normalize_obs(self.next_observations[batch_inds, env_indices, :], env)
 
-        # print("next obs:\n", next_obs.tolist(), file=f2)
+        # print("(buffer sample) observation:", self._normalize_obs(self.observations[batch_inds, env_indices, :], env))
+        # print("(buffer sample) next obs:", next_obs)
         # f2.close()
         data = (
             self._normalize_obs(self.observations[batch_inds, env_indices, :], env),
@@ -321,6 +322,12 @@ class ReplayBuffer(BaseBuffer):
             (self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
             self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
         )
+        # f3 = open("buffer Sac.txt", "a")
+        # print("all obs \n", self.observations.tolist(), file=f3)
+        # print("obs \n", self._normalize_obs(self.observations[batch_inds, env_indices, :], env).tolist(), file=f3)
+        # print("next obs \n", next_obs.tolist(), file=f3)
+        # print("____________", file=f3)
+        # f3.close()
         # print(self.observations)
         return ReplayBufferSamples(*tuple(map(self.to_torch, data)))
 
@@ -873,7 +880,7 @@ class ReplayBufferExt(ReplayBuffer):
                     f"replay buffer {total_memory_usage:.2f}GB > {mem_available:.2f}GB"
                 )
 
-        self.hiddens = np.zeros((self.buffer_size, self.n_envs))
+        self.hiddens = np.zeros((self.buffer_size,2, 10), dtype=np.float32) #todo parametrizzare le dimensioni
         self.seq_lenght = seq_lenght #todo use kwargs to set it (now with the default parameter)
     def add(
         self,
@@ -906,8 +913,10 @@ class ReplayBufferExt(ReplayBuffer):
         self.actions[self.pos] = np.array(action).copy()
         self.rewards[self.pos] = np.array(reward).copy()
         self.dones[self.pos] = np.array(done).copy()
-        #self.hiddens[self.pos] = np.array(hidden).copy()  #todo add hidden to buffer
-
+        if hidden is not None :
+            #print("hidden to add, shape:", hidden.shape)
+            self.hiddens[self.pos] = np.array(hidden).copy()  #todo, correct add hidden to buffer only if not none and else leave zero?
+        print("hiddens in add:", hidden)
         if self.handle_timeout_termination:
             self.timeouts[self.pos] = np.array([info.get("TimeLimit.truncated", False) for info in infos])
 
@@ -941,7 +950,7 @@ class ReplayBufferExt(ReplayBuffer):
             batch_inds = (np.random.randint(1, self.buffer_size, size=batch_size) + self.pos) % self.buffer_size
         else:
             print("indice batch ok")
-            batch_inds = np.random.randint(self.seq_lenght, self.pos, size=batch_size)
+            batch_inds = np.random.randint(self.seq_lenght, self.pos-1, size=batch_size)
         return self._get_samples(batch_inds, env=env)
 
     def _get_samples(self, batch_inds: np.ndarray, env: Optional[VecNormalize] = None) -> ReplayBufferSamplesExt:
@@ -955,18 +964,23 @@ class ReplayBufferExt(ReplayBuffer):
         # else:
         #      next_obs = self._normalize_obs(self.next_observations[batch_inds, env_indices, :], env)
 
-        next_obs=self.extract_sample_seq(batch_inds,env_indices)
+        temp_obs, next_obs=self.extract_sample_seq(batch_inds+1,env_indices)
         print("(buffer sample) obs shape: ",next_obs.shape)
         data = (
-            self._normalize_obs(self.observations[batch_inds, env_indices, :], env),
+            self._normalize_obs(temp_obs, env),
             self.actions[batch_inds, env_indices, :],
             next_obs,
             # Only use dones that are not due to timeouts
             # deactivated by default (timeouts is initialized as an array of False)
             (self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
             self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
-            self.hiddens[batch_inds, env_indices] #todo capire cosa estrarre
+            self.hiddens[batch_inds] #todo capire cosa estrarre
         )
+        # f3 = open("hidden.txt", "a")
+        # print("hidden \n",self.hiddens.tolist(),file=f3)
+        # print("hidden extract\n", self.hiddens[self.pos-1].tolist(), file=f3)
+        # print("____________",file=f3)
+        # f3.close()
         return ReplayBufferSamplesExt(*tuple(map(self.to_torch, data)))
 
     def extract_sample_seq(self,batch_inds: np.ndarray, env_inds: np.ndarray) -> np.ndarray:
@@ -974,32 +988,35 @@ class ReplayBufferExt(ReplayBuffer):
 
         range_batch_inds= np.ndarray(shape= (len(batch_inds),self.seq_lenght), dtype=np.int)
         reshaped_env_inds = np.ndarray(shape=(len(env_inds), self.seq_lenght), dtype=np.int)
+        added_range_batch_inds= np.ndarray(shape= (len(batch_inds),self.seq_lenght), dtype=np.int)
         # print("range: ",range_batch_inds.shape)
         i = 0
         for seq_ind in batch_inds:
             seq_range=np.arange((seq_ind-self.seq_lenght),seq_ind)
             temp_env_ind= env_inds[i]
             #print(seq_range)
-            while (True in self.dones[seq_range[:-1],temp_env_ind]):
+            while (True in self.dones[seq_range,temp_env_ind]): #seq_range[:-1]
                 print("while looping to avoid done in sequence")
-                print("done ind: ", seq_range,temp_env_ind)
+                # print("done ind: ", seq_range,temp_env_ind)
                 ind = np.random.randint(self.seq_lenght, self.pos)
                 seq_range = np.arange((ind - self.seq_lenght), ind)
                 temp_env_ind= np.random.randint(0, high=self.n_envs)
 
             range_batch_inds[i]=seq_range
+            added_range_batch_inds[i]=seq_range+1
             reshaped_env_inds[i] = np.repeat(temp_env_ind, 5)
             i +=1
 
         # print("dones", self.dones.shape)
         # print("obs", self.next_observations.shape)
+        #print("range:",range_batch_inds,"\n added:",added_range_batch_inds)
 
-        f3 = open("ext_output.txt", "a")
-        print("obs \n", self.next_observations.tolist(), file=f3)
-        print("ranges \n", range_batch_inds.tolist(), file=f3)
-        print("extracted \n",self.next_observations[range_batch_inds, reshaped_env_inds, :].tolist(),file=f3)
-        print("____________",file=f3)
-        f3.close()
+        # f3 = open("ext_output.txt", "a")
+        # # print("obs \n", self.next_observations.tolist(), file=f3)
+        # # print("ranges \n", range_batch_inds.tolist(), file=f3)
+        # print("extracted \n",self.next_observations[range_batch_inds, reshaped_env_inds, :].tolist(),file=f3)
+        # print("____________",file=f3)
+        # f3.close()
 
 
-        return self.next_observations[range_batch_inds, reshaped_env_inds, :]
+        return self.observations[added_range_batch_inds, reshaped_env_inds, :],self.next_observations[range_batch_inds, reshaped_env_inds, :]
