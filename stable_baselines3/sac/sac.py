@@ -214,14 +214,15 @@ class SAC(OffPolicyAlgorithm):
                 self.actor.reset_noise()
 
             # Action by the current actor for the sampled state
-            print("(sac) replay data obs: ", replay_data.observations.shape)
+            # print("(sac) replay data obs: ", replay_data.observations.shape)
 
             if isinstance(self.replay_buffer, ReplayBufferExt):
-                print("(sac) replay data hidden: ", replay_data.hiddens.shape)
-                print("sac launch log prog with ext buffer")
+                # print("(sac) replay data hidden: ", replay_data.hiddens.shape)
+                # print("sac launch actor log prog with ext buffer")
                 actions_pi, log_prob = self.actor.action_log_prob(replay_data.observations,replay_data.hiddens)
+                actions_pi = actions_pi.reshape(256, 5, -1)  # todo parametrizzare valori
             else:
-                print("launch log prog")
+                # print("launch actor log prog normal")
                 actions_pi, log_prob = self.actor.action_log_prob(replay_data.observations)
             log_prob = log_prob.reshape(-1, 1)
 
@@ -247,19 +248,28 @@ class SAC(OffPolicyAlgorithm):
 
             with th.no_grad():
                 if isinstance(self.replay_buffer, ReplayBufferExt):
-                    print("sac launch log prog with ext buffer for next action")
+                    # print("sac launch actor log prog with ext buffer for next action")
                     next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations, replay_data.hiddens)
+                    next_actions=next_actions.reshape(256,5,-1) #todo parametrizzare valori
                 else:
-                    print("launch log progfor next action")
+                    # print("launch actor log prog for next action normal")
                     next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations)
                 #on if before:
                     # Select action according to policy
                     # next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations)
                 # Compute the next Q values: min over all critics targets
-                next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
+
+                # print("calcolato next action\n", next_actions.shape)
+                next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1) # chiama forward in common policy riga 895
+                # print("(sac) q_value successiva calcolata")
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
+
                 # add entropy term
+                # print("q_value shape: ",next_q_values.shape)
+                # print("ent_coef shape: ",ent_coef.shape)
+                # print("log_prob shape: ",next_log_prob.reshape(-1, 1).shape)
                 next_q_values = next_q_values - ent_coef * next_log_prob.reshape(-1, 1)
+                # print("q_value shape: ", next_q_values.shape)
                 # td error + entropy term
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 

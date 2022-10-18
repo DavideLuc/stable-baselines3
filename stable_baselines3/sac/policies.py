@@ -6,7 +6,7 @@ import torch as th
 from torch import nn
 
 from stable_baselines3.common.distributions import SquashedDiagGaussianDistribution, StateDependentNoiseDistribution
-from stable_baselines3.common.policies import BasePolicy, ContinuousCritic
+from stable_baselines3.common.policies import BasePolicy, ContinuousCritic, ContinuousCriticRnn
 from stable_baselines3.common.preprocessing import get_action_dim
 from stable_baselines3.common.torch_layers import (
     BaseFeaturesExtractor,
@@ -16,6 +16,7 @@ from stable_baselines3.common.torch_layers import (
     NatureCNN,
     create_mlp,
     get_actor_critic_arch,
+    RNN
 )
 from stable_baselines3.common.type_aliases import Schedule
 
@@ -160,8 +161,7 @@ class Actor(BasePolicy):
         :return:
             Mean, standard deviation and optional keyword arguments.
         """
-        #todo remove print
-        print("(actor)obs shape: ", obs.shape)
+
         features = self.extract_features(obs)
         latent_pi = self.latent_pi(features)
         mean_actions = self.mu(latent_pi)
@@ -668,10 +668,10 @@ class ActorRnn(BasePolicy):
         features = self.extract_features(obs)
 
 
-        print("(actor rnn)feat shape:", features.shape)
-        if hidden != None: print("(actor rnn)hidden:", hidden.shape)
+        # print("(actor rnn)feat shape:", features.shape)
+        # if hidden != None: print("(actor rnn)hidden:", hidden.shape)
 
-        print("hidden for rnn is:", hidden)
+        # print("hidden for rnn is:", hidden)
         latent_pi,hidden = self.latent_pi(features,hidden) #forward di RNN
 
         mean_actions = self.mu(latent_pi)
@@ -684,20 +684,20 @@ class ActorRnn(BasePolicy):
         return mean_actions, log_std, {}, hidden
 
     def forward(self, obs: th.Tensor, deterministic: bool = False) -> th.Tensor:
-        print("forward actor")
+        # print("forward actor")
         mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,None)
-        print("mean acntion:", mean_actions)
-        print("forward actor done\n")
+        # print("mean acntion:", mean_actions)
+        # print("forward actor done\n")
         # Note: the action is squashed
         return self.action_dist.actions_from_params(mean_actions, log_std, deterministic=deterministic, **kwargs), hidden
 
     def action_log_prob(self, obs: th.Tensor, oldHidden: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
-        print("log_prob actor")
+        # print("log_prob actor")
         mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,oldHidden)
-        print("hidden:", hidden.shape)
+        # print("hidden:", hidden.shape)
         # return action and associated log prob
-        print("mean acntion:",mean_actions)
-        print("log_prob ok")
+        # print("mean action:",mean_actions.shape)
+        # print("log_prob ok")
         return self.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs)
 
     def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
@@ -822,7 +822,8 @@ class RnnPolicy(BasePolicy):
             critic_parameters = self.critic.parameters()
 
         # Critic target should not share the features extractor with critic
-        self.critic_target = self.make_critic(features_extractor=None)
+        #todo messo stesso feature extractor per errore flatten quando eseguo next q value sac (riga 262)
+        self.critic_target = self.make_critic(features_extractor=self.actor.features_extractor)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         self.critic.optimizer = self.optimizer_class(critic_parameters, lr=lr_schedule(1), **self.optimizer_kwargs)
@@ -863,9 +864,9 @@ class RnnPolicy(BasePolicy):
         actor_kwargs = self._update_features_extractor(self.actor_kwargs, features_extractor)
         return ActorRnn(**actor_kwargs).to(self.device)
 
-    def make_critic(self, features_extractor: Optional[BaseFeaturesExtractor] = None) -> ContinuousCritic:
+    def make_critic(self, features_extractor: Optional[BaseFeaturesExtractor] = None) -> ContinuousCriticRnn:
         critic_kwargs = self._update_features_extractor(self.critic_kwargs, features_extractor)
-        return ContinuousCritic(**critic_kwargs).to(self.device)
+        return ContinuousCriticRnn(**critic_kwargs).to(self.device)
 
     def forward(self, obs: th.Tensor, deterministic: bool = False) -> th.Tensor:
         #return self._predict(obs, state=state, deterministic=deterministic)
@@ -874,7 +875,7 @@ class RnnPolicy(BasePolicy):
 
     def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
         #return self.actor(observation, state=state, deterministic=deterministic)
-        print("Rnnpolicy predict")
+        # print("Rnnpolicy predict")
         return self.actor(observation, deterministic=deterministic) #call forward of RnnActor
 
     def set_training_mode(self, mode: bool) -> None:
@@ -890,40 +891,3 @@ class RnnPolicy(BasePolicy):
         self.training = mode
 
 
-class RNN(nn.Module):
-    def __init__(self, input_size, output_size, hidden_dim, n_layers):
-        super(RNN, self).__init__()
-
-        self.hidden_dim = hidden_dim
-
-        # define an RNN with specified parameters
-        # batch_first means that the first dim of the input and output will be the batch_size
-        self.rnn = nn.GRU(input_size, hidden_dim, n_layers, batch_first=True)
-
-        # last, fully-connected layer
-        self.fc = nn.Linear(hidden_dim, output_size)
-
-    def forward(self, x, hidden):
-        # x (batch_size, seq_length, input_size)
-        # hidden (n_layers, batch_size, hidden_dim)
-        # r_out (batch_size, time_step, hidden_size)
-        print("x:", x.shape)
-        batch_size = x.size(0)
-        #todo check if reshape is ok
-        if hidden is not None:
-            hidden=hidden.reshape(2,256,10)
-
-        # print("in of GRU layer out:", x)
-        # print("in of GRU layer hidden:", hidden)
-
-        # get RNN outputs
-        r_out, hidden = self.rnn(x, hidden)
-        # print("out of GRU layer out:",r_out)
-        # print("out of GRU layer hidden:",hidden)
-        # shape output to be (batch_size*seq_length, hidden_dim)
-        r_out = r_out.reshape(-1, self.hidden_dim)
-
-        # get final output
-        output = self.fc(r_out)
-
-        return output, hidden

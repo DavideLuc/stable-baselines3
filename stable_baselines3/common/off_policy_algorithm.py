@@ -408,7 +408,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # we assume that the policy uses tanh to scale the action
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
             if isinstance(self.replay_buffer, ReplayBufferExt):
-                print("off policy sample action launch predict")
+                # print("off policy sample action launch predict")
                 unscaled_action,hidden = self.predict(self._last_obs, deterministic=False)
             else:
                 unscaled_action,_ = self.predict(self._last_obs, deterministic=False)

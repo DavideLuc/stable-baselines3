@@ -916,7 +916,7 @@ class ReplayBufferExt(ReplayBuffer):
         if hidden is not None :
             #print("hidden to add, shape:", hidden.shape)
             self.hiddens[self.pos] = np.array(hidden).copy()  #todo, correct add hidden to buffer only if not none and else leave zero?
-        print("hiddens in add:", hidden)
+        # print("hiddens in add:", hidden)
         if self.handle_timeout_termination:
             self.timeouts[self.pos] = np.array([info.get("TimeLimit.truncated", False) for info in infos])
 
@@ -946,10 +946,10 @@ class ReplayBufferExt(ReplayBuffer):
         # Do not sample the element with index `self.pos` as the transitions is invalid
         # (we use only one array to store `obs` and `next_obs`)
         if self.full: #todo gestire caso buffer pieno
-            print("indice batch full")
+            print("_____________\tindice batch full")
             batch_inds = (np.random.randint(1, self.buffer_size, size=batch_size) + self.pos) % self.buffer_size
         else:
-            print("indice batch ok")
+            # print("indice batch ok")
             batch_inds = np.random.randint(self.seq_lenght, self.pos-1, size=batch_size)
         return self._get_samples(batch_inds, env=env)
 
@@ -964,16 +964,17 @@ class ReplayBufferExt(ReplayBuffer):
         # else:
         #      next_obs = self._normalize_obs(self.next_observations[batch_inds, env_indices, :], env)
 
-        temp_obs, next_obs=self.extract_sample_seq(batch_inds+1,env_indices)
-        print("(buffer sample) obs shape: ",next_obs.shape)
+        range_batch_inds, added_range_batch_inds, reshaped_env_inds=self.extract_sample_seq(batch_inds+1,env_indices)
+
+
         data = (
-            self._normalize_obs(temp_obs, env),
-            self.actions[batch_inds, env_indices, :],
-            next_obs,
+            self._normalize_obs(self.observations[range_batch_inds, reshaped_env_inds, :], env),
+            self.actions[range_batch_inds, reshaped_env_inds, :],
+            self.next_observations[added_range_batch_inds, reshaped_env_inds, :],
             # Only use dones that are not due to timeouts
             # deactivated by default (timeouts is initialized as an array of False)
-            (self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
-            self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
+            (self.dones[range_batch_inds, reshaped_env_inds] * (1 - self.timeouts[range_batch_inds, reshaped_env_inds])).reshape(-1, 1),
+            self._normalize_reward(self.rewards[range_batch_inds, reshaped_env_inds].reshape(-1, 1), env),
             self.hiddens[batch_inds] #todo capire cosa estrarre
         )
         # f3 = open("hidden.txt", "a")
@@ -995,10 +996,10 @@ class ReplayBufferExt(ReplayBuffer):
             seq_range=np.arange((seq_ind-self.seq_lenght),seq_ind)
             temp_env_ind= env_inds[i]
             #print(seq_range)
-            while (True in self.dones[seq_range,temp_env_ind]): #seq_range[:-1]
-                print("while looping to avoid done in sequence")
+            while (True in self.dones[seq_range[:-1],temp_env_ind]): #seq_range[:-1]
+                # print("while looping to avoid done in sequence")
                 # print("done ind: ", seq_range,temp_env_ind)
-                ind = np.random.randint(self.seq_lenght, self.pos)
+                ind = np.random.randint(self.seq_lenght, self.pos-1)
                 seq_range = np.arange((ind - self.seq_lenght), ind)
                 temp_env_ind= np.random.randint(0, high=self.n_envs)
 
@@ -1019,4 +1020,4 @@ class ReplayBufferExt(ReplayBuffer):
         # f3.close()
 
 
-        return self.observations[added_range_batch_inds, reshaped_env_inds, :],self.next_observations[range_batch_inds, reshaped_env_inds, :]
+        return range_batch_inds, added_range_batch_inds, reshaped_env_inds
