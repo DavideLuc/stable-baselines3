@@ -946,8 +946,8 @@ class ReplayBufferExt(ReplayBuffer):
         # Do not sample the element with index `self.pos` as the transitions is invalid
         # (we use only one array to store `obs` and `next_obs`)
         if self.full: #todo gestire caso buffer pieno
-            print("_____________\tindice batch full")
-            batch_inds = (np.random.randint(1, self.buffer_size, size=batch_size) + self.pos) % self.buffer_size
+            # print("_____________\tindice batch full")
+            batch_inds = (np.random.randint(self.seq_lenght+1, self.buffer_size-1, size=batch_size) + self.pos) % self.buffer_size-1
         else:
             # print("indice batch ok")
             batch_inds = np.random.randint(self.seq_lenght, self.pos-1, size=batch_size)
@@ -996,7 +996,8 @@ class ReplayBufferExt(ReplayBuffer):
             seq_range=np.arange((seq_ind-self.seq_lenght),seq_ind)
             temp_env_ind= env_inds[i]
             #print(seq_range)
-            while (True in self.dones[seq_range[:-1],temp_env_ind]): #seq_range[:-1]
+            #todo check the condition after 'and'
+            while (True in self.dones[seq_range[:-1],temp_env_ind] and (self.seq_lenght<self.pos-1)): #seq_range[:-1]
                 # print("while looping to avoid done in sequence")
                 # print("done ind: ", seq_range,temp_env_ind)
                 ind = np.random.randint(self.seq_lenght, self.pos-1)

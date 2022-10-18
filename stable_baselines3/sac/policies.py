@@ -685,7 +685,7 @@ class ActorRnn(BasePolicy):
 
     def forward(self, obs: th.Tensor, deterministic: bool = False) -> th.Tensor:
         # print("forward actor")
-        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,None)
+        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,None) #todo maybe hidden layer
         # print("mean acntion:", mean_actions)
         # print("forward actor done\n")
         # Note: the action is squashed

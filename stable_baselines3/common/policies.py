@@ -992,7 +992,7 @@ class ContinuousCriticRnn(BaseModel):
         # print("q_value_input shape:",qvalue_input.shape)
         # for q_net in self.q_networks:
             # print("q_net forward is:", q_net(qvalue_input,None)[0].shape)
-        return tuple(q_net(qvalue_input,None)[0] for q_net in self.q_networks)
+        return tuple(q_net(qvalue_input,None)[0] for q_net in self.q_networks) #todo maybe need hidden on q_net
 
     def q1_forward(self, obs: th.Tensor, actions: th.Tensor) -> th.Tensor:
         """
