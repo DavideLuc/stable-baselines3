@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import gym
 import numpy as np
+import torch
 import torch as th
 
 from stable_baselines3.common.base_class import BaseAlgorithm
@@ -305,6 +306,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # Go to the previous index
             pos = (replay_buffer.pos - 1) % replay_buffer.buffer_size
             replay_buffer.dones[pos] = True
+        if self.replay_buffer_kwargs !={}:
+            self.hiddenState = np.zeros((self.replay_buffer_kwargs["n_layer"], self.replay_buffer_kwargs["hidden_dim"]), dtype=np.float32)  # todo parametrizzare le dimensioni
 
         return super()._setup_learn(
             total_timesteps,
@@ -344,6 +347,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         callback.on_training_start(locals(), globals())
 
         while self.num_timesteps < total_timesteps:
+            print("\nlaunch rollout")
             rollout = self.collect_rollouts(
                 self.env,
                 train_freq=self.train_freq,
@@ -358,12 +362,14 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 break
 
             if self.num_timesteps > 0 and self.num_timesteps > self.learning_starts:
+                #print("training")
                 # If no `gradient_steps` is specified,
                 # do as many gradients steps as steps performed during the rollout
                 gradient_steps = self.gradient_steps if self.gradient_steps >= 0 else rollout.episode_timesteps
                 # Special case when the user passes `gradient_steps=0`
                 if gradient_steps > 0:
-                    self.train(batch_size=self.batch_size, gradient_steps=gradient_steps)
+                    print("launch train")
+                    self.train(batch_size=self.batch_size, gradient_steps=gradient_steps) #call to sac train
 
         callback.on_training_end()
 
@@ -381,6 +387,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         learning_starts: int,
         action_noise: Optional[ActionNoise] = None,
         n_envs: int = 1,
+        hidden: th.Tensor = None
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Sample an action according to the exploration policy.
@@ -397,8 +404,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             and scaled action that will be stored in the replay buffer.
             The two differs when the action space is not normalized (bounds are not [-1, 1]).
         """
-        #todo define hidden state
-        hidden = None
+
+        # print("hidden on off policy sample_action:",hidden, hidden.shape)
         # Select action randomly or according to policy
         if self.num_timesteps < learning_starts and not (self.use_sde and self.use_sde_at_warmup):
             # Warmup phase
@@ -408,8 +415,13 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # we assume that the policy uses tanh to scale the action
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
             if isinstance(self.replay_buffer, ReplayBufferExt):
-                # print("off policy sample action launch predict")
-                unscaled_action,hidden = self.predict(self._last_obs, deterministic=False)
+                # f = open("HiddenPredict.txt","a")
+                # print("Hidden before:", hidden,file=f)
+                print("obs dim for call predict:",self._last_obs.shape, hidden.shape)
+                unscaled_action,self.hiddenState = self.predict(self._last_obs, hidden, deterministic=False)
+                print("after predict", self.hiddenState)
+                # print("Hidden after:", self.hiddenState, file=f)
+                # f.close()
             else:
                 unscaled_action,_ = self.predict(self._last_obs, deterministic=False)
 
@@ -425,12 +437,13 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # We store the scaled action in the buffer
             buffer_action = scaled_action
             action = self.policy.unscale_action(scaled_action)
-            if isinstance(self.replay_buffer, ReplayBufferExt):
-                return action, buffer_action, hidden
+            # if isinstance(self.replay_buffer, ReplayBufferExt):
+            #     return action, buffer_action, newHidden
         else:
             # Discrete case, no need to normalize or clip
             buffer_action = unscaled_action
             action = buffer_action
+
         return action, buffer_action
 
     def _dump_logs(self) -> None:
@@ -590,15 +603,24 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
         callback.on_rollout_start()
         continue_training = True
+        # print("collect_rollout")
 
         while should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
+
             if self.use_sde and self.sde_sample_freq > 0 and num_collected_steps % self.sde_sample_freq == 0:
                 # Sample a new noise matrix
                 self.actor.reset_noise(env.num_envs)
 
             # Select action randomly or according to policy
             if isinstance(self.replay_buffer, ReplayBufferExt):
-                actions, buffer_actions, hidden = self._sample_action(learning_starts, action_noise, env.num_envs)
+                np.set_printoptions(threshold=100)
+                print("Hidden state for rollout", self.hiddenState)
+                actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs,self.hiddenState)
+
+                # if hiddenSample is not None:
+                #     self.hiddenState = np.array(hiddenSample).copy()
+
+
             else:
                 actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs)
 
@@ -619,7 +641,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
             # Store data in replay buffer (normalized action and unnormalized observation)
             if isinstance(self.replay_buffer, ReplayBufferExt):
-                self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos,hidden=hidden)
+                self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos,hidden=self.hiddenState)
             else:
                 self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos)
 
@@ -644,7 +666,6 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                     # Log training infos
                     if log_interval is not None and self._episode_num % log_interval == 0:
                         self._dump_logs()
-
         callback.on_rollout_end()
-
+        print("rollout end\n")
         return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training)

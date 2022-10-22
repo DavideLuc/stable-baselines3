@@ -180,6 +180,7 @@ class Actor(BasePolicy):
         return self.action_dist.actions_from_params(mean_actions, log_std, deterministic=deterministic, **kwargs)
 
     def action_log_prob(self, obs: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
+        print("log prob obs:", obs.shape)
         mean_actions, log_std, kwargs = self.get_action_dist_params(obs)
         # return action and associated log prob
         return self.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs)
@@ -353,6 +354,7 @@ class SACPolicy(BasePolicy):
         return ContinuousCritic(**critic_kwargs).to(self.device)
 
     def forward(self, obs: th.Tensor, deterministic: bool = False) -> th.Tensor:
+        print("forward SACpolicy")
         return self._predict(obs, deterministic=deterministic)
 
     def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
@@ -550,6 +552,9 @@ class ActorRnn(BasePolicy):
         net_arch: List[int],
         features_extractor: nn.Module,
         features_dim: int,
+        hidden_dim: int,
+        n_layer: int,
+        output_size: int,
         activation_fn: Type[nn.Module] = nn.ReLU,
         use_sde: bool = False,
         log_std_init: float = -3,
@@ -586,11 +591,9 @@ class ActorRnn(BasePolicy):
         #   OLD mlp policy
         # latent_pi_net = create_mlp(features_dim, -1, net_arch, activation_fn)
         # self.latent_pi = nn.Sequential(*latent_pi_net)
-        #todo parametrizzare
-        hidden_dim=10
-        n_layers=2
-        output_size=256
-        self.latent_pi = RNN(features_dim,output_size,hidden_dim,n_layers)
+
+        #creo rnn con parametri da creazione sacRnn
+        self.latent_pi = RNN(features_dim,output_size,hidden_dim,n_layer)
 
 
         last_layer_dim = net_arch[-1] if len(net_arch) > 0 else features_dim
@@ -609,8 +612,8 @@ class ActorRnn(BasePolicy):
                 self.mu = nn.Sequential(self.mu, nn.Hardtanh(min_val=-clip_mean, max_val=clip_mean))
         else:
             self.action_dist = SquashedDiagGaussianDistribution(action_dim)
-            self.mu = nn.Linear(last_layer_dim, action_dim)
-            self.log_std = nn.Linear(last_layer_dim, action_dim)
+            self.mu = nn.Linear(hidden_dim, action_dim)
+            self.log_std = nn.Linear(hidden_dim, action_dim)
 
     def _get_constructor_parameters(self) -> Dict[str, Any]:
         data = super()._get_constructor_parameters()
@@ -662,19 +665,19 @@ class ActorRnn(BasePolicy):
         :return:
             Mean, standard deviation and optional keyword arguments.
         """
-        #todo capire se ok feature extraction
-
-        # print("(actor rnn)obs shape:", obs.shape)
+        #todo capire se ok feature extraction (problem with image)
+        # print("obs to exctract feature", obs.shape)
         features = self.extract_features(obs)
-
+        # print("exctracted feature", features.shape)
 
         # print("(actor rnn)feat shape:", features.shape)
         # if hidden != None: print("(actor rnn)hidden:", hidden.shape)
 
         # print("hidden for rnn is:", hidden)
         latent_pi,hidden = self.latent_pi(features,hidden) #forward di RNN
-
+        print("output rnn", latent_pi.shape, hidden.shape)
         mean_actions = self.mu(latent_pi)
+
         if self.use_sde:
             return mean_actions, self.log_std, dict(latent_sde=latent_pi)
         # Unstructured exploration (Original implementation)
@@ -683,22 +686,25 @@ class ActorRnn(BasePolicy):
         log_std = th.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
         return mean_actions, log_std, {}, hidden
 
-    def forward(self, obs: th.Tensor, deterministic: bool = False) -> th.Tensor:
-        # print("forward actor")
-        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,None) #todo maybe hidden layer
+    def forward(self, obs: th.Tensor, oldHidden: th.Tensor, deterministic: bool = False) -> th.Tensor:
+        # print("forward actor", oldHidden.shape, obs.shape)
+        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,oldHidden) #todo maybe hidden layer
         # print("mean acntion:", mean_actions)
         # print("forward actor done\n")
         # Note: the action is squashed
         return self.action_dist.actions_from_params(mean_actions, log_std, deterministic=deterministic, **kwargs), hidden
 
     def action_log_prob(self, obs: th.Tensor, oldHidden: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
-        # print("log_prob actor")
+        # print("log_prob actor",obs.shape,oldHidden.shape)
         mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,oldHidden)
+
         # print("hidden:", hidden.shape)
         # return action and associated log prob
         # print("mean action:",mean_actions.shape)
-        # print("log_prob ok")
-        return self.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs)
+        print("log_prob ok")
+        return self.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs), hidden
+
+
 
     def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
         return self(observation, deterministic)
@@ -740,6 +746,9 @@ class RnnPolicy(BasePolicy):
         observation_space: gym.spaces.Space,
         action_space: gym.spaces.Space,
         lr_schedule: Schedule,
+        hidden_dim: int,
+        n_layer: int,
+        output_size: int,
         net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
         use_sde: bool = False,
@@ -754,6 +763,7 @@ class RnnPolicy(BasePolicy):
         optimizer_kwargs: Optional[Dict[str, Any]] = None,
         n_critics: int = 2,
         share_features_extractor: bool = False,
+
     ):
         super().__init__(
             observation_space,
@@ -791,6 +801,12 @@ class RnnPolicy(BasePolicy):
             "clip_mean": clip_mean,
         }
         self.actor_kwargs.update(sde_kwargs)
+        rnn_actor = {
+            "hidden_dim": hidden_dim,
+            "n_layer": n_layer,
+            "output_size": output_size,
+        }
+        self.actor_kwargs.update(rnn_actor)
         self.critic_kwargs = self.net_args.copy()
         self.critic_kwargs.update(
             {
@@ -806,6 +822,8 @@ class RnnPolicy(BasePolicy):
 
         self._build(lr_schedule)
 
+
+
     def _build(self, lr_schedule: Schedule) -> None:
         self.actor = self.make_actor()
         self.actor.optimizer = self.optimizer_class(self.actor.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
@@ -818,12 +836,12 @@ class RnnPolicy(BasePolicy):
         else:
             # Create a separate features extractor for the critic
             # this requires more memory and computation
+            print("critic with none extractor")
             self.critic = self.make_critic(features_extractor=None)
             critic_parameters = self.critic.parameters()
 
         # Critic target should not share the features extractor with critic
-        #todo messo stesso feature extractor per errore flatten quando eseguo next q value sac (riga 262)
-        self.critic_target = self.make_critic(features_extractor=self.actor.features_extractor)
+        self.critic_target = self.make_critic(features_extractor=None)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         self.critic.optimizer = self.optimizer_class(critic_parameters, lr=lr_schedule(1), **self.optimizer_kwargs)
@@ -864,19 +882,18 @@ class RnnPolicy(BasePolicy):
         actor_kwargs = self._update_features_extractor(self.actor_kwargs, features_extractor)
         return ActorRnn(**actor_kwargs).to(self.device)
 
-    def make_critic(self, features_extractor: Optional[BaseFeaturesExtractor] = None) -> ContinuousCriticRnn:
+    def make_critic(self, features_extractor: Optional[BaseFeaturesExtractor] = None) -> ContinuousCritic:
         critic_kwargs = self._update_features_extractor(self.critic_kwargs, features_extractor)
-        return ContinuousCriticRnn(**critic_kwargs).to(self.device)
+        return ContinuousCritic(**critic_kwargs).to(self.device)#todo select the right Critic
 
-    def forward(self, obs: th.Tensor, deterministic: bool = False) -> th.Tensor:
+    def forward(self, obs: th.Tensor, hidden: th.Tensor, deterministic: bool = False) -> th.Tensor:
         #return self._predict(obs, state=state, deterministic=deterministic)
         print("Rnnpolicy forward")
-        return self._predict(obs, deterministic=deterministic)
+        return self._predict(obs, hidden, deterministic=deterministic)
 
-    def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
+    def _predict(self, observation: th.Tensor, hidden: th.Tensor, deterministic: bool = False) -> th.Tensor:
         #return self.actor(observation, state=state, deterministic=deterministic)
-        # print("Rnnpolicy predict")
-        return self.actor(observation, deterministic=deterministic) #call forward of RnnActor
+        return self.actor(observation, hidden, deterministic=deterministic) #call forward of RnnActor
 
     def set_training_mode(self, mode: bool) -> None:
         """

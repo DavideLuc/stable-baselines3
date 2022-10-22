@@ -339,11 +339,14 @@ class BasePolicy(BaseModel):
 
         observation, vectorized_env = self.obs_to_tensor(observation)
 
+        # print("(on predict) hidden state:", state, state.shape)
         with th.no_grad():
             # print("extractor class",self.features_extractor_class)
             if (self.features_extractor_class==RNNFlattenExtractor): #todo condition for rnn
                 # print("condition ok")
-                actions,state = self._predict(observation, deterministic=deterministic)
+                if state is not None:
+                    state = th.as_tensor(state).to(self.device)
+                actions,state = self._predict(observation, state, deterministic=deterministic)
                 state = state.cpu().numpy()
                 # print("shape state", state.shape)
             else:
@@ -352,7 +355,7 @@ class BasePolicy(BaseModel):
         # Convert to numpy, and reshape to the original action shape
         actions = actions.cpu().numpy().reshape((-1,) + self.action_space.shape)
 
-        #todo (reshape è fatto su sac\policies RNN riga 913)
+        #todo (reshape hidden state è fatto su sample del buffer)
 
         if isinstance(self.action_space, gym.spaces.Box):
             if self.squash_output:
@@ -981,7 +984,7 @@ class ContinuousCriticRnn(BaseModel):
             self.add_module(f"qf{idx}", q_net)
             self.q_networks.append(q_net)
 
-    def forward(self, obs: th.Tensor, actions: th.Tensor) -> Tuple[th.Tensor, ...]:
+    def forward(self, obs: th.Tensor, actions: th.Tensor, hidden: th.Tensor) -> Tuple[th.Tensor, ...]:
         # print("forward continuos critic (common policy)")
         # Learn the features extractor using the policy loss only
         # when the features_extractor is shared with the actor
@@ -992,7 +995,7 @@ class ContinuousCriticRnn(BaseModel):
         # print("q_value_input shape:",qvalue_input.shape)
         # for q_net in self.q_networks:
             # print("q_net forward is:", q_net(qvalue_input,None)[0].shape)
-        return tuple(q_net(qvalue_input,None)[0] for q_net in self.q_networks) #todo maybe need hidden on q_net
+        return tuple(q_net(qvalue_input,hidden)[0] for q_net in self.q_networks) #todo maybe need hidden on q_net
 
     def q1_forward(self, obs: th.Tensor, actions: th.Tensor) -> th.Tensor:
         """

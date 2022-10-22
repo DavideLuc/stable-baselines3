@@ -343,7 +343,7 @@ class RNN(nn.Module):
         self.rnn = nn.GRU(input_size, hidden_dim, n_layers, batch_first=True)
 
         # last, fully-connected layer
-        self.fc = nn.Linear(hidden_dim, output_size)
+
 
     def forward(self, x, hidden):
         # x (batch_size, seq_length, input_size)
@@ -353,20 +353,19 @@ class RNN(nn.Module):
         # print("x:", x.shape)
         batch_size = x.size(0)
         #todo check if reshape is ok
-        if hidden is not None:
-            hidden=hidden.reshape(2,256,10)
+        # if hidden is not None:
+        #     hidden=hidden.reshape(2,256,10)
 
         # print("in of GRU layer out:", x)
         # print("in of GRU layer hidden:", hidden)
 
         # get RNN outputs
-        r_out, hidden = self.rnn(x, hidden)
+        output, hidden = self.rnn(x, hidden)
         # print("out of GRU layer out:",r_out)
         # print("out of GRU layer hidden:",hidden)
         # shape output to be (batch_size*seq_length, hidden_dim)
-        r_out = r_out.reshape(-1, self.hidden_dim)
+
+        # r_out = r_out.reshape(-1, self.hidden_dim)
 
         # get final output
-        output = self.fc(r_out)
-
         return output, hidden
