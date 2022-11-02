@@ -54,6 +54,7 @@ class ReplayBufferSamplesExt(NamedTuple):
     rewards: th.Tensor
     hiddens: th.Tensor
 
+
 class DictReplayBufferSamples(ReplayBufferSamples):
     observations: TensorDict
     actions: th.Tensor

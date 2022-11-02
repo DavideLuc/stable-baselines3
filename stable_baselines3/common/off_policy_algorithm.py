@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import gym
+import matplotlib.pyplot
 import numpy as np
 import torch
 import torch as th
@@ -347,7 +348,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         callback.on_training_start(locals(), globals())
 
         while self.num_timesteps < total_timesteps:
-            print("\nlaunch rollout")
+            # print("\nlaunch rollout")
             rollout = self.collect_rollouts(
                 self.env,
                 train_freq=self.train_freq,
@@ -368,7 +369,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 gradient_steps = self.gradient_steps if self.gradient_steps >= 0 else rollout.episode_timesteps
                 # Special case when the user passes `gradient_steps=0`
                 if gradient_steps > 0:
-                    print("launch train")
+                    # print("launch train")
                     self.train(batch_size=self.batch_size, gradient_steps=gradient_steps) #call to sac train
 
         callback.on_training_end()
@@ -417,9 +418,10 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             if isinstance(self.replay_buffer, ReplayBufferExt):
                 # f = open("HiddenPredict.txt","a")
                 # print("Hidden before:", hidden,file=f)
-                print("obs dim for call predict:",self._last_obs.shape, hidden.shape)
-                unscaled_action,self.hiddenState = self.predict(self._last_obs, hidden, deterministic=False)
-                print("after predict", self.hiddenState)
+                # print("obs dim for call predict:",self._last_obs.shape, hidden.shape)
+                # print("sample_action")
+                unscaled_action,self.hiddenState = self.predict(self._last_obs, hidden, deterministic=False) #call the common policy predict
+                # print("after predict", self.hiddenState)
                 # print("Hidden after:", self.hiddenState, file=f)
                 # f.close()
             else:
@@ -613,10 +615,15 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
             # Select action randomly or according to policy
             if isinstance(self.replay_buffer, ReplayBufferExt):
-                np.set_printoptions(threshold=100)
-                print("Hidden state for rollout", self.hiddenState)
-                actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs,self.hiddenState)
+                #todo check print of hidden
 
+                # np.set_printoptions(threshold=100)
+                # fil= open("hidden on rollout.txt","a")
+                # print("\tOBS for rollout", self._last_obs,file=fil)
+                # print("Hidden state on rollout for sample action", self.hiddenState, file=fil)
+                actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs,self.hiddenState)
+                # print("Hidden state on rollout AFTER sample action", self.hiddenState, file=fil)
+                # fil.close()
                 # if hiddenSample is not None:
                 #     self.hiddenState = np.array(hiddenSample).copy()
 
@@ -641,6 +648,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
             # Store data in replay buffer (normalized action and unnormalized observation)
             if isinstance(self.replay_buffer, ReplayBufferExt):
+                # print("step collect",replay_buffer, buffer_actions)
                 self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos,hidden=self.hiddenState)
             else:
                 self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos)
@@ -666,6 +674,11 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                     # Log training infos
                     if log_interval is not None and self._episode_num % log_interval == 0:
                         self._dump_logs()
+                        # matplotlib.pyplot.show() # todo remove plot
+
+                    if isinstance(self.replay_buffer, ReplayBufferExt):
+                        print("hidden reset")
+                        self.hiddenState= None
         callback.on_rollout_end()
-        print("rollout end\n")
+        # print("rollout end\n")
         return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training)

@@ -6,7 +6,7 @@ import torch as th
 from torch import nn
 
 from stable_baselines3.common.distributions import SquashedDiagGaussianDistribution, StateDependentNoiseDistribution
-from stable_baselines3.common.policies import BasePolicy, ContinuousCritic, ContinuousCriticRnn
+from stable_baselines3.common.policies import BasePolicy, ContinuousCritic, ContinuousCriticRnn, ContinuousCritic_withoutExtractor
 from stable_baselines3.common.preprocessing import get_action_dim
 from stable_baselines3.common.torch_layers import (
     BaseFeaturesExtractor,
@@ -180,7 +180,7 @@ class Actor(BasePolicy):
         return self.action_dist.actions_from_params(mean_actions, log_std, deterministic=deterministic, **kwargs)
 
     def action_log_prob(self, obs: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
-        print("log prob obs:", obs.shape)
+        # print("log prob obs:", obs.shape)
         mean_actions, log_std, kwargs = self.get_action_dist_params(obs)
         # return action and associated log prob
         return self.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs)
@@ -354,7 +354,7 @@ class SACPolicy(BasePolicy):
         return ContinuousCritic(**critic_kwargs).to(self.device)
 
     def forward(self, obs: th.Tensor, deterministic: bool = False) -> th.Tensor:
-        print("forward SACpolicy")
+        # print("forward SACpolicy")
         return self._predict(obs, deterministic=deterministic)
 
     def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
@@ -554,7 +554,6 @@ class ActorRnn(BasePolicy):
         features_dim: int,
         hidden_dim: int,
         n_layer: int,
-        output_size: int,
         activation_fn: Type[nn.Module] = nn.ReLU,
         use_sde: bool = False,
         log_std_init: float = -3,
@@ -588,13 +587,12 @@ class ActorRnn(BasePolicy):
             warnings.warn("sde_net_arch is deprecated and will be removed in SB3 v2.4.0.", DeprecationWarning)
 
         action_dim = get_action_dim(self.action_space)
-        #   OLD mlp policy
-        # latent_pi_net = create_mlp(features_dim, -1, net_arch, activation_fn)
-        # self.latent_pi = nn.Sequential(*latent_pi_net)
 
-        #creo rnn con parametri da creazione sacRnn
-        self.latent_pi = RNN(features_dim,output_size,hidden_dim,n_layer)
+        #todo add posibility to choose GRU or LSTM or RNN
+        self.latent_pi = nn.GRU(features_dim,hidden_dim,n_layer, batch_first=True)
 
+        latent_pi_net2 = create_mlp(hidden_dim, -1, net_arch, activation_fn)
+        self.latent_pi2 = nn.Sequential(*latent_pi_net2)
 
         last_layer_dim = net_arch[-1] if len(net_arch) > 0 else features_dim
 
@@ -612,8 +610,8 @@ class ActorRnn(BasePolicy):
                 self.mu = nn.Sequential(self.mu, nn.Hardtanh(min_val=-clip_mean, max_val=clip_mean))
         else:
             self.action_dist = SquashedDiagGaussianDistribution(action_dim)
-            self.mu = nn.Linear(hidden_dim, action_dim)
-            self.log_std = nn.Linear(hidden_dim, action_dim)
+            self.mu = nn.Linear(last_layer_dim, action_dim)
+            self.log_std = nn.Linear(last_layer_dim, action_dim)
 
     def _get_constructor_parameters(self) -> Dict[str, Any]:
         data = super()._get_constructor_parameters()
@@ -666,16 +664,17 @@ class ActorRnn(BasePolicy):
             Mean, standard deviation and optional keyword arguments.
         """
         #todo capire se ok feature extraction (problem with image)
-        # print("obs to exctract feature", obs.shape)
-        features = self.extract_features(obs)
-        # print("exctracted feature", features.shape)
 
-        # print("(actor rnn)feat shape:", features.shape)
-        # if hidden != None: print("(actor rnn)hidden:", hidden.shape)
+        # print("dist param")
+
+        features = obs #self.extract_features(obs)
 
         # print("hidden for rnn is:", hidden)
-        latent_pi,hidden = self.latent_pi(features,hidden) #forward di RNN
-        print("output rnn", latent_pi.shape, hidden.shape)
+        latent_pi,hidden = self.latent_pi(features,hidden) #forward di rete riccorrente
+        outputRnn = latent_pi
+        latent_pi = self.latent_pi2(latent_pi)
+        # print("action out from latent\n", latent_pi.shape)
+
         mean_actions = self.mu(latent_pi)
 
         if self.use_sde:
@@ -684,25 +683,58 @@ class ActorRnn(BasePolicy):
         log_std = self.log_std(latent_pi)
         # Original Implementation to cap the standard deviation
         log_std = th.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
-        return mean_actions, log_std, {}, hidden
+        return mean_actions, log_std, {}, outputRnn, hidden
+
+    def get_action_dist_params_seq(self, obs: th.Tensor, hidden: th.Tensor) -> Tuple[th.Tensor, th.Tensor, Dict[str, th.Tensor]]:
+        """
+        Get the parameters for the action distribution.
+
+        :param obs:
+        :return:
+            Mean, standard deviation and optional keyword arguments.
+        """
+        #todo capire se ok feature extraction (problem with image)
+
+        # print("dist param seq")
+        features = obs#self.extract_features(obs)
+
+
+
+        latent_pi,hidden = self.latent_pi(features,hidden) #forward di RNN
+        # print("output GRU:", latent_pi)
+        latent_pi = latent_pi[:, -1, :]  # extrac the last of seq todo check if correct
+        outputRnn = latent_pi
+        # print("seq action out from rrn", latent_pi.shape)
+        latent_pi=self.latent_pi2(latent_pi)
+        # th.set_printoptions(threshold=100000)
+        # print("seq action out from latent", latent_pi.shape)
+        mean_actions = self.mu(latent_pi)
+
+        if self.use_sde:
+            return mean_actions, self.log_std, dict(latent_sde=latent_pi)
+        # Unstructured exploration (Original implementation)
+        log_std = self.log_std(latent_pi)
+        # Original Implementation to cap the standard deviation
+        log_std = th.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
+        return mean_actions, log_std, {}, outputRnn, hidden
 
     def forward(self, obs: th.Tensor, oldHidden: th.Tensor, deterministic: bool = False) -> th.Tensor:
-        # print("forward actor", oldHidden.shape, obs.shape)
-        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,oldHidden) #todo maybe hidden layer
+        # print("forward actor")
+        mean_actions, log_std, kwargs, outputRnn, hidden = self.get_action_dist_params(obs,oldHidden)
         # print("mean acntion:", mean_actions)
         # print("forward actor done\n")
         # Note: the action is squashed
-        return self.action_dist.actions_from_params(mean_actions, log_std, deterministic=deterministic, **kwargs), hidden
+        return self.action_dist.actions_from_params(mean_actions, log_std, deterministic=deterministic, **kwargs), hidden #not used outputRnn for the predict
 
     def action_log_prob(self, obs: th.Tensor, oldHidden: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
         # print("log_prob actor",obs.shape,oldHidden.shape)
-        mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,oldHidden)
+        mean_actions, log_std, kwargs, outputRnn, newHidden = self.get_action_dist_params_seq(obs,oldHidden)
 
         # print("hidden:", hidden.shape)
         # return action and associated log prob
         # print("mean action:",mean_actions.shape)
-        print("log_prob ok")
-        return self.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs), hidden
+        # print("log_prob ok")
+        return self.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs), outputRnn, newHidden
 
 
 
@@ -748,7 +780,6 @@ class RnnPolicy(BasePolicy):
         lr_schedule: Schedule,
         hidden_dim: int,
         n_layer: int,
-        output_size: int,
         net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
         use_sde: bool = False,
@@ -801,13 +832,15 @@ class RnnPolicy(BasePolicy):
             "clip_mean": clip_mean,
         }
         self.actor_kwargs.update(sde_kwargs)
-        rnn_actor = {
+        rnn_param = {
             "hidden_dim": hidden_dim,
             "n_layer": n_layer,
-            "output_size": output_size,
         }
-        self.actor_kwargs.update(rnn_actor)
+        self.actor_kwargs.update(rnn_param)
+
+
         self.critic_kwargs = self.net_args.copy()
+        # print("ini", self.critic_kwargs)
         self.critic_kwargs.update(
             {
                 "n_critics": n_critics,
@@ -815,10 +848,13 @@ class RnnPolicy(BasePolicy):
                 "share_features_extractor": share_features_extractor,
             }
         )
+        self.critic_kwargs.update(rnn_param)
 
         self.actor, self.actor_target = None, None
         self.critic, self.critic_target = None, None
         self.share_features_extractor = share_features_extractor
+
+        self.hidden_dim = hidden_dim
 
         self._build(lr_schedule)
 
@@ -829,6 +865,7 @@ class RnnPolicy(BasePolicy):
         self.actor.optimizer = self.optimizer_class(self.actor.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
 
         if self.share_features_extractor:
+            print("shared extractor actor-critic")
             self.critic = self.make_critic(features_extractor=self.actor.features_extractor)
             # Do not optimize the shared features extractor with the critic loss
             # otherwise, there are gradient computation issues
@@ -836,7 +873,7 @@ class RnnPolicy(BasePolicy):
         else:
             # Create a separate features extractor for the critic
             # this requires more memory and computation
-            print("critic with none extractor")
+            # print("critic with none extractor")
             self.critic = self.make_critic(features_extractor=None)
             critic_parameters = self.critic.parameters()
 
@@ -882,9 +919,10 @@ class RnnPolicy(BasePolicy):
         actor_kwargs = self._update_features_extractor(self.actor_kwargs, features_extractor)
         return ActorRnn(**actor_kwargs).to(self.device)
 
-    def make_critic(self, features_extractor: Optional[BaseFeaturesExtractor] = None) -> ContinuousCritic:
+    def make_critic(self, features_extractor: Optional[BaseFeaturesExtractor] = None) -> ContinuousCritic_withoutExtractor:
         critic_kwargs = self._update_features_extractor(self.critic_kwargs, features_extractor)
-        return ContinuousCritic(**critic_kwargs).to(self.device)#todo select the right Critic
+        #critic_kwargs.update({"features_dim":self.hidden_dim}) #to change the feature dim for hidden instead of observation's dim
+        return ContinuousCriticRnn(**critic_kwargs).to(self.device)
 
     def forward(self, obs: th.Tensor, hidden: th.Tensor, deterministic: bool = False) -> th.Tensor:
         #return self._predict(obs, state=state, deterministic=deterministic)
@@ -892,6 +930,7 @@ class RnnPolicy(BasePolicy):
         return self._predict(obs, hidden, deterministic=deterministic)
 
     def _predict(self, observation: th.Tensor, hidden: th.Tensor, deterministic: bool = False) -> th.Tensor:
+        # print("predict sac policy")
         #return self.actor(observation, state=state, deterministic=deterministic)
         return self.actor(observation, hidden, deterministic=deterministic) #call forward of RnnActor
 

@@ -57,7 +57,7 @@ class RNNFlattenExtractor(BaseFeaturesExtractor):
 
     def __init__(self, observation_space: gym.Space):
         super().__init__(observation_space, get_flattened_obs_dim(observation_space))
-        #self.flatten = nn.Flatten(start_dim=0)
+
 
     def forward(self, observations: th.Tensor) -> th.Tensor:
         return observations
@@ -337,35 +337,23 @@ class RNN(nn.Module):
         super(RNN, self).__init__()
 
         self.hidden_dim = hidden_dim
-
         # define an RNN with specified parameters
         # batch_first means that the first dim of the input and output will be the batch_size
         self.rnn = nn.GRU(input_size, hidden_dim, n_layers, batch_first=True)
+        #todo add posibility to chose GRU or LSTM
 
-        # last, fully-connected layer
+        # self.rnn = nn.LSTM(input_size,hidden_dim,n_layers,batch_first=True)
 
+        self.fc = nn.Linear(hidden_dim, output_size)
 
     def forward(self, x, hidden):
-        # x (batch_size, seq_length, input_size)
-        # hidden (n_layers, batch_size, hidden_dim)
-        # r_out (batch_size, time_step, hidden_size)
-
-        # print("x:", x.shape)
-        batch_size = x.size(0)
-        #todo check if reshape is ok
-        # if hidden is not None:
-        #     hidden=hidden.reshape(2,256,10)
-
-        # print("in of GRU layer out:", x)
-        # print("in of GRU layer hidden:", hidden)
 
         # get RNN outputs
-        output, hidden = self.rnn(x, hidden)
-        # print("out of GRU layer out:",r_out)
-        # print("out of GRU layer hidden:",hidden)
-        # shape output to be (batch_size*seq_length, hidden_dim)
+        r_out, hidden = self.rnn(x, hidden)
 
-        # r_out = r_out.reshape(-1, self.hidden_dim)
+
+        # get final output
+        output = self.fc(r_out[:,-1,:])
 
         # get final output
         return output, hidden

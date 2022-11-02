@@ -8,10 +8,11 @@ from torch.nn import functional as F
 from stable_baselines3.common.buffers import ReplayBuffer, ReplayBufferExt
 from stable_baselines3.common.noise import ActionNoise
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
-from stable_baselines3.common.policies import BasePolicy
+from stable_baselines3.common.policies import BasePolicy, ContinuousCritic, ContinuousCriticRnn, ContinuousCritic_withoutExtractor
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 from stable_baselines3.common.utils import get_parameters_by_name, polyak_update
 from stable_baselines3.sac.policies import CnnPolicy, MlpPolicy, MultiInputPolicy, SACPolicy, RnnPolicy
+
 
 
 class SAC(OffPolicyAlgorithm):
@@ -242,8 +243,6 @@ class SAC(OffPolicyAlgorithm):
                 # add entropy term
                 next_q_values = next_q_values - ent_coef * next_log_prob.reshape(-1, 1)
                 # td error + entropy term
-                print("target input:", replay_data.rewards.shape, replay_data.dones.shape,
-                      next_q_values.shape)
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
             # Get current Q-values estimates for each critic network
@@ -257,6 +256,8 @@ class SAC(OffPolicyAlgorithm):
             # Optimize the critic
             self.critic.optimizer.zero_grad()
             critic_loss.backward()
+            # f1 = plt.figure(0)
+            # plot_grad_flow(self.critic.named_parameters(), "gradiente critic loss")
             self.critic.optimizer.step()
 
             # Compute actor loss
@@ -270,6 +271,8 @@ class SAC(OffPolicyAlgorithm):
             # Optimize the actor
             self.actor.optimizer.zero_grad()
             actor_loss.backward()
+            # f2 = plt.figure(1)
+            # plot_grad_flow(self.actor.named_parameters(), "gradiente actor loss")
             self.actor.optimizer.step()
 
             # Update target networks
@@ -424,7 +427,7 @@ class SACrnn(OffPolicyAlgorithm):
         #parametrization for hidden dimension and sequence length
         replay_buffer_kwargs.update(policy_kwargs)
         #parametrization for the output size of rnn
-        policy_kwargs.update({"output_size":batch_size})
+        #policy_kwargs.update({"output_size":batch_size})
         super().__init__(
             policy,
             env,
@@ -522,24 +525,26 @@ class SACrnn(OffPolicyAlgorithm):
             # Sample replay buffer
             replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
 
-
             # We need to sample because `log_std` may have changed between two gradient steps
             if self.use_sde:
                 self.actor.reset_noise()
 
             # Action by the current actor for the sampled state
-            # print("(sac) replay data obs: ", replay_data.observations.shape)
 
+            # print("(sac) replay data obs: ", replay_data.observations.shape, replay_data.hiddens.shape)
 
-            # np.set_printoptions(threshold=6000)
-            # f1= open("hideen from samplebuffer","a")
-            # print("(sac) replay data hidden: ", replay_data.hiddens.cpu().numpy(), file=f1)
+            # th.set_printoptions(threshold=10000)
+            # f1= open("buffer_sample with timestamp.txt","a")
+            # print("replay data obs: ", replay_data.observations.tolist(), file=f1)
+            # print("replay data next obs: ", replay_data.next_observations.tolist(), file=f1)
+            # print("replay data hidden: ", replay_data.hiddens, file=f1)
             # f1.close()
-            # print("sac launch actor log prog with ext buffer")
-            (actions_pi, log_prob), hiddenLOG = self.actor.action_log_prob(replay_data.observations,replay_data.hiddens)
-            print("(train)log_prob action:",actions_pi.shape, log_prob.shape, hiddenLOG.shape)
 
-            #actions_pi = actions_pi.reshape(self.batch_size, self.replay_buffer_kwargs['seq_length'], -1)  # reshape con parametrizzati
+            (actions_pi, log_prob), outputRnn, hiddenCurrent = self.actor.action_log_prob(replay_data.observations,replay_data.hiddens)
+            outputRnnDetach = outputRnn.detach()
+            hiddenCurrentDetach = hiddenCurrent.detach()
+
+
 
             log_prob = log_prob.reshape(-1, 1)
 
@@ -565,62 +570,92 @@ class SACrnn(OffPolicyAlgorithm):
 
             with th.no_grad():
 
-                # print("sac launch actor log prog with ext buffer for next action")
-                (next_actions, next_log_prob), hiddenLOGnext = self.actor.action_log_prob(replay_data.next_observations, replay_data.hiddens)
-                print("(train)log_prob NEXT action:",next_actions.shape, next_log_prob.shape)
+                # print("sac launch actor log prog with ext buffer for next action",replay_data.next_observations.shape, hiddenCurrentDetach.shape)
 
-                #on if before:
-                    # Select action according to policy
-                    # next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations)
+                # Select action according to policy
+                (next_actions, next_log_prob), nextOutputRnn, next_hiddens = self.actor.action_log_prob(replay_data.next_observations, hiddenCurrentDetach)
+                # print("log_prob NEXT action:",next_hiddens[-1,:,:])
+
+
                 # Compute the next Q values: min over all critics targets
 
-                print("INPUT for critic_target:", replay_data.next_observations[:,-1,:].shape, next_actions[:,-1,:].shape)
-                #next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions, replay_data.hiddens), dim=1) # chiama forward in common policy riga 895
-                #todo questa è una prova per usare critica vecchia (cambiare su SAC\policies)
-                next_q_values = th.cat(
-                    self.critic_target(replay_data.next_observations[:,-1,:], next_actions[:,-1,:]),    #todo check [...] here and down (fino a riga 610
-                    dim=1)  # chiama forward in common policy riga 895
+                # print("INPUT for critic_target:", next_hiddens.shape, next_actions.shape)
+
+                if isinstance(self.critic_target,ContinuousCritic_withoutExtractor):
+                    # print("target critic normal")
+                    next_q_values = th.cat(self.critic_target(nextOutputRnn, next_actions), dim=1)  # old: next_hiddens[-1,:,:]   # chiama forward in common policy riga 895
+
+                elif isinstance(self.critic_target,ContinuousCritic):
+                    # print("target critic rnn",next_hiddens[-1,:,:].shape, next_actions.shape)
+                    next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
+
+                elif isinstance(self.critic_target, ContinuousCriticRnn):
+                    next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
 
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
-                print("(sac) q_value successiva calcolata", next_q_values.shape)
                 # add entropy term
-                # print("q_value shape: ",next_q_values.shape)
-                # print("ent_coef shape: ",ent_coef.shape)
-                # print("log_prob shape: ",next_log_prob[-1].reshape(-1, 1).shape)
                 next_q_values = next_q_values - ent_coef * next_log_prob.reshape(-1, 1)
                 # print("q_value shape: ", next_q_values.shape)
                 # td error + entropy term
-                print("target input:", replay_data.rewards[:,-1].reshape(-1,1) .shape, replay_data.dones.shape, next_q_values.shape)
-                target_q_values = replay_data.rewards[:,-1].reshape(-1,1) + (1 - replay_data.dones[:,-1].reshape(-1,1)) * self.gamma * next_q_values
+                # print("target input:", replay_data.rewards[:,-1].reshape(-1,1).shape, replay_data.dones.shape, next_q_values.shape)
+                target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
             # Get current Q-values estimates for each critic network
             # using action from the replay buffer
-            print("shape osservazioni e azioni per critic",replay_data.observations[:,-1,:].shape, replay_data.actions[:,-1,:].shape)
-            current_q_values = self.critic(replay_data.observations[:,-1,:], replay_data.actions[:,-1,:]) # todo add hidden if reccurent critic
+            # print("shape osservazioni e azioni per critic",replay_data.observations[:,-1,:].shape, replay_data.actions[:,-1,:].shape)
 
-            print("critic loss:", current_q_values[0].shape, target_q_values.shape)
+            if isinstance(self.critic_target, ContinuousCritic_withoutExtractor):
+                # print("critic normal")
+                current_q_values = self.critic(outputRnnDetach, replay_data.actions) # old: hiddenCurrentDetach[-1,:,:]    #todo check detach
+                #print("critic loss:", current_q_values[0].shape, target_q_values.shape)
+
+            elif isinstance(self.critic_target, ContinuousCritic):
+                # print("critic rnn", replay_data.hiddens[-1,:,:].shape, replay_data.actions[:,-1,:].shape)
+                current_q_values = self.critic(replay_data.observations, replay_data.actions)
+
+            elif isinstance(self.critic_target, ContinuousCriticRnn):
+                current_q_values = self.critic(replay_data.observations, replay_data.actions)
+
+            # print("critic loss:\n", current_q_values[0].tolist(), "\n",target_q_values.tolist())
             # Compute critic loss
             critic_loss = 0.5 * sum(F.mse_loss(current_q, target_q_values) for current_q in current_q_values)
             critic_losses.append(critic_loss.item())
 
             # Optimize the critic
             self.critic.optimizer.zero_grad()
-            critic_loss.backward()
+            critic_loss.backward() # todo maybe retain_graph=True
+            # f1 = plt.figure(0)
+            # plot_grad_flow(self.critic.named_parameters(),"gradiente critic loss")
             self.critic.optimizer.step()
 
             # Compute actor loss
             # Alternative: actor_loss = th.mean(log_prob - qf1_pi)
             # Mean over all critic networks
-            q_values_pi = th.cat(self.critic(replay_data.observations[:,-1,:], actions_pi[:,-1,:]), dim=1)
+            if isinstance(self.critic_target, ContinuousCritic_withoutExtractor):
+                # print("critic normal")
+                q_values_pi = th.cat(self.critic(outputRnn, actions_pi), dim=1) # old: hiddenCurrent[-1,:,:],
+            elif isinstance(self.critic_target, ContinuousCritic):
+                # print("critic rnn pi" ,replay_data.hiddens[-1,:,:].shape ,actions_pi.shape)
+                q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
+            elif isinstance(self.critic_target, ContinuousCriticRnn):
+                q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
+
+            #todo chek if correct to detach
+            # q_values_pi = q_values_pi.detach()  #like in line 201 of reccurrent sac
+
+            # print("values pi",q_values_pi.shape)
             min_qf_pi, _ = th.min(q_values_pi, dim=1, keepdim=True)
-            actor_loss = (ent_coef * log_prob[0] - min_qf_pi).mean()
+            # print("actor loss", ent_coef.shape, log_prob.shape, min_qf_pi.shape)
+            actor_loss = (ent_coef * log_prob - min_qf_pi).mean()
             actor_losses.append(actor_loss.item())
 
             # Optimize the actor
             self.actor.optimizer.zero_grad()
             actor_loss.backward()
+            # f2 = plt.figure(1)
+            # plot_grad_flow(self.actor.named_parameters(),"gradiente actor loss")
             self.actor.optimizer.step()
-
+            # print("loss actor grad", actor_loss.grad)
             # Update target networks
             if gradient_step % self.target_update_interval == 0:
                 polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.tau)
@@ -635,7 +670,7 @@ class SACrnn(OffPolicyAlgorithm):
         self.logger.record("train/critic_loss", np.mean(critic_losses))
         if len(ent_coef_losses) > 0:
             self.logger.record("train/ent_coef_loss", np.mean(ent_coef_losses))
-
+        # plt.show()
         # input("train end...")
 
     def learn(
@@ -663,6 +698,7 @@ class SACrnn(OffPolicyAlgorithm):
             reset_num_timesteps=reset_num_timesteps,
         )
 
+
     def _excluded_save_params(self) -> List[str]:
         return super()._excluded_save_params() + ["actor", "critic", "critic_target"]
 
@@ -674,3 +710,55 @@ class SACrnn(OffPolicyAlgorithm):
         else:
             saved_pytorch_variables = ["ent_coef_tensor"]
         return state_dicts, saved_pytorch_variable
+
+import matplotlib.pyplot as plt
+
+# def plot_grad_flow(named_parameters):
+#     '''Plots the gradients flowing through different layers in the net during training.
+#     Can be used for checking for possible gradient vanishing / exploding problems.
+#
+#     Usage: Plug this function in Trainer class after loss.backwards() as
+#     "plot_grad_flow(self.model.named_parameters())" to visualize the gradient flow'''
+#     ave_grads = []
+#     max_grads = []
+#     layers = []
+#     for n, p in named_parameters:
+#         if (p.requires_grad) and ("bias" not in n):
+#             layers.append(n)
+#             ave_grads.append(p.grad.abs().mean())
+#             max_grads.append(p.grad.abs().max())
+#
+#     plt.bar(np.arange(len(max_grads)), max_grads, alpha=0.1, lw=1, color="c")
+#     plt.bar(np.arange(len(max_grads)), ave_grads, alpha=0.1, lw=1, color="b")
+#     plt.hlines(0, 0, len(ave_grads) + 1, lw=2, color="k")
+#     plt.xticks(range(0, len(ave_grads), 1), layers, rotation="vertical")
+#     plt.xlim(left=0, right=len(ave_grads))
+#     plt.ylim(bottom=-0.001, top=0.02)  # zoom in on the lower gradient regions
+#     plt.xlabel("Layers")
+#     plt.ylabel("average gradient")
+#     plt.title("Gradient flow")
+#     plt.grid(True)
+#     plt.show()
+#     # plt.legend([Line2D([0], [0], color="c", lw=4),
+#     #             Line2D([0], [0], color="b", lw=4),
+#     #             Line2D([0], [0], color="k", lw=4)], ['max-gradient', 'mean-gradient', 'zero-gradient'])
+
+
+def plot_grad_flow(named_parameters, title):
+    ave_grads = []
+    layers = []
+    for n, p in named_parameters:
+        if(p.requires_grad) and ("bias" not in n):
+            layers.append(n)
+            ave_grads.append(p.grad.abs().mean())
+
+    plt.plot(ave_grads, alpha=0.3, color="b")
+    plt.hlines(0, 0, len(ave_grads)+1, linewidth=1, color="k" )
+    plt.xticks(range(0,len(ave_grads), 1), layers, rotation="vertical", )
+    plt.xlim(xmin=0, xmax=len(ave_grads))
+    plt.xlabel("Layers")
+    plt.ylabel("average gradient")
+    plt.title(title)
+    plt.grid(True)
+    plt.tight_layout()
+    # plt.show()
