@@ -308,7 +308,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             pos = (replay_buffer.pos - 1) % replay_buffer.buffer_size
             replay_buffer.dones[pos] = True
         if self.replay_buffer_kwargs !={}:
-            self.hiddenState = np.zeros((self.replay_buffer_kwargs["n_layer"], self.replay_buffer_kwargs["hidden_dim"]), dtype=np.float32)  # todo parametrizzare le dimensioni
+            self.hiddenState = np.zeros((self.replay_buffer_kwargs["n_layer"], self.replay_buffer_kwargs["hidden_dim"]), dtype=np.float32)
 
         return super()._setup_learn(
             total_timesteps,
@@ -348,7 +348,6 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         callback.on_training_start(locals(), globals())
 
         while self.num_timesteps < total_timesteps:
-            # print("\nlaunch rollout")
             rollout = self.collect_rollouts(
                 self.env,
                 train_freq=self.train_freq,
@@ -363,13 +362,11 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 break
 
             if self.num_timesteps > 0 and self.num_timesteps > self.learning_starts:
-                #print("training")
                 # If no `gradient_steps` is specified,
                 # do as many gradients steps as steps performed during the rollout
                 gradient_steps = self.gradient_steps if self.gradient_steps >= 0 else rollout.episode_timesteps
                 # Special case when the user passes `gradient_steps=0`
                 if gradient_steps > 0:
-                    # print("launch train")
                     self.train(batch_size=self.batch_size, gradient_steps=gradient_steps) #call to sac train
 
         callback.on_training_end()
@@ -406,7 +403,6 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             The two differs when the action space is not normalized (bounds are not [-1, 1]).
         """
 
-        # print("hidden on off policy sample_action:",hidden, hidden.shape)
         # Select action randomly or according to policy
         if self.num_timesteps < learning_starts and not (self.use_sde and self.use_sde_at_warmup):
             # Warmup phase
@@ -415,15 +411,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # Note: when using continuous actions,
             # we assume that the policy uses tanh to scale the action
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
-            if isinstance(self.replay_buffer, ReplayBufferExt):
-                # f = open("HiddenPredict.txt","a")
-                # print("Hidden before:", hidden,file=f)
-                # print("obs dim for call predict:",self._last_obs.shape, hidden.shape)
-                # print("sample_action")
+            if (self.__class__.__name__ == 'SACrnn'):
                 unscaled_action,self.hiddenState = self.predict(self._last_obs, hidden, deterministic=False) #call the common policy predict
-                # print("after predict", self.hiddenState)
-                # print("Hidden after:", self.hiddenState, file=f)
-                # f.close()
             else:
                 unscaled_action,_ = self.predict(self._last_obs, deterministic=False)
 
@@ -439,8 +428,6 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # We store the scaled action in the buffer
             buffer_action = scaled_action
             action = self.policy.unscale_action(scaled_action)
-            # if isinstance(self.replay_buffer, ReplayBufferExt):
-            #     return action, buffer_action, newHidden
         else:
             # Discrete case, no need to normalize or clip
             buffer_action = unscaled_action
@@ -530,7 +517,6 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                         next_obs[i] = self._vec_normalize_env.unnormalize_obs(next_obs[i, :])
 
         if isinstance(self.replay_buffer, ReplayBufferExt):
-            # print("add on extended buffer")
             replay_buffer.add(
                 self._last_original_obs,
                 next_obs,
@@ -551,7 +537,6 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             )
 
         self._last_obs = new_obs
-        # print("(store_transition) last_ops shape: ",self._last_obs.shape)
         # Save the unnormalized observation
         if self._vec_normalize_env is not None:
             self._last_original_obs = new_obs_
@@ -605,7 +590,6 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
         callback.on_rollout_start()
         continue_training = True
-        # print("collect_rollout")
 
         while should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
 
@@ -614,20 +598,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 self.actor.reset_noise(env.num_envs)
 
             # Select action randomly or according to policy
-            if isinstance(self.replay_buffer, ReplayBufferExt):
-                #todo check print of hidden
-
-                # np.set_printoptions(threshold=100)
-                # fil= open("hidden on rollout.txt","a")
-                # print("\tOBS for rollout", self._last_obs,file=fil)
-                # print("Hidden state on rollout for sample action", self.hiddenState, file=fil)
+            if (self.__class__.__name__ == 'SACrnn'):
                 actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs,self.hiddenState)
-                # print("Hidden state on rollout AFTER sample action", self.hiddenState, file=fil)
-                # fil.close()
-                # if hiddenSample is not None:
-                #     self.hiddenState = np.array(hiddenSample).copy()
-
-
             else:
                 actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs)
 
@@ -648,7 +620,6 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
             # Store data in replay buffer (normalized action and unnormalized observation)
             if isinstance(self.replay_buffer, ReplayBufferExt):
-                # print("step collect",replay_buffer, buffer_actions)
                 self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos,hidden=self.hiddenState)
             else:
                 self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos)
@@ -676,9 +647,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                         self._dump_logs()
                         # matplotlib.pyplot.show() # todo remove plot
 
-                    if isinstance(self.replay_buffer, ReplayBufferExt):
-                        print("hidden reset")
+                    if (self.__class__.__name__ == 'SACrnn'):
                         self.hiddenState= None
         callback.on_rollout_end()
-        # print("rollout end\n")
         return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training)

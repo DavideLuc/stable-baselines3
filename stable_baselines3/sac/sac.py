@@ -8,7 +8,7 @@ from torch.nn import functional as F
 from stable_baselines3.common.buffers import ReplayBuffer, ReplayBufferExt
 from stable_baselines3.common.noise import ActionNoise
 from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
-from stable_baselines3.common.policies import BasePolicy, ContinuousCritic, ContinuousCriticRnn, ContinuousCritic_withoutExtractor
+from stable_baselines3.common.policies import BasePolicy, ContinuousCritic#, ContinuousCriticRnn, ContinuousCritic_withoutExtractor
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 from stable_baselines3.common.utils import get_parameters_by_name, polyak_update
 from stable_baselines3.sac.policies import CnnPolicy, MlpPolicy, MultiInputPolicy, SACPolicy, RnnPolicy
@@ -256,8 +256,6 @@ class SAC(OffPolicyAlgorithm):
             # Optimize the critic
             self.critic.optimizer.zero_grad()
             critic_loss.backward()
-            # f1 = plt.figure(0)
-            # plot_grad_flow(self.critic.named_parameters(), "gradiente critic loss")
             self.critic.optimizer.step()
 
             # Compute actor loss
@@ -271,8 +269,6 @@ class SAC(OffPolicyAlgorithm):
             # Optimize the actor
             self.actor.optimizer.zero_grad()
             actor_loss.backward()
-            # f2 = plt.figure(1)
-            # plot_grad_flow(self.actor.named_parameters(), "gradiente actor loss")
             self.actor.optimizer.step()
 
             # Update target networks
@@ -531,17 +527,7 @@ class SACrnn(OffPolicyAlgorithm):
 
             # Action by the current actor for the sampled state
 
-            # print("(sac) replay data obs: ", replay_data.observations.shape, replay_data.hiddens.shape)
-
-            # th.set_printoptions(threshold=10000)
-            # f1= open("buffer_sample with timestamp.txt","a")
-            # print("replay data obs: ", replay_data.observations.tolist(), file=f1)
-            # print("replay data next obs: ", replay_data.next_observations.tolist(), file=f1)
-            # print("replay data hidden: ", replay_data.hiddens, file=f1)
-            # f1.close()
-
-            (actions_pi, log_prob), outputRnn, hiddenCurrent = self.actor.action_log_prob(replay_data.observations,replay_data.hiddens)
-            outputRnnDetach = outputRnn.detach()
+            (actions_pi, log_prob), hiddenCurrent = self.actor.action_log_prob(replay_data.observations,replay_data.hiddens)
             hiddenCurrentDetach = hiddenCurrent.detach()
 
 
@@ -570,60 +556,44 @@ class SACrnn(OffPolicyAlgorithm):
 
             with th.no_grad():
 
-                # print("sac launch actor log prog with ext buffer for next action",replay_data.next_observations.shape, hiddenCurrentDetach.shape)
-
                 # Select action according to policy
-                (next_actions, next_log_prob), nextOutputRnn, next_hiddens = self.actor.action_log_prob(replay_data.next_observations, hiddenCurrentDetach)
-                # print("log_prob NEXT action:",next_hiddens[-1,:,:])
-
+                (next_actions, next_log_prob), _ = self.actor.action_log_prob(replay_data.next_observations, hiddenCurrentDetach)
 
                 # Compute the next Q values: min over all critics targets
-
-                # print("INPUT for critic_target:", next_hiddens.shape, next_actions.shape)
-
-                if isinstance(self.critic_target,ContinuousCritic_withoutExtractor):
-                    # print("target critic normal")
-                    next_q_values = th.cat(self.critic_target(nextOutputRnn, next_actions), dim=1)  # old: next_hiddens[-1,:,:]   # chiama forward in common policy riga 895
-
-                elif isinstance(self.critic_target,ContinuousCritic):
-                    # print("target critic rnn",next_hiddens[-1,:,:].shape, next_actions.shape)
-                    next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
-
-                elif isinstance(self.critic_target, ContinuousCriticRnn):
-                    next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
+                # if isinstance(self.critic_target,ContinuousCritic_withoutExtractor):
+                #     next_q_values = th.cat(self.critic_target(nextOutputRnn, next_actions), dim=1)  # old: next_hiddens[-1,:,:]   # chiama forward in common policy riga 895
+                #
+                # elif isinstance(self.critic_target,ContinuousCritic):
+                #     next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
+                #
+                # elif isinstance(self.critic_target, ContinuousCriticRnn):
+                next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
 
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
                 # add entropy term
                 next_q_values = next_q_values - ent_coef * next_log_prob.reshape(-1, 1)
-                # print("q_value shape: ", next_q_values.shape)
                 # td error + entropy term
-                # print("target input:", replay_data.rewards[:,-1].reshape(-1,1).shape, replay_data.dones.shape, next_q_values.shape)
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
             # Get current Q-values estimates for each critic network
             # using action from the replay buffer
-            # print("shape osservazioni e azioni per critic",replay_data.observations[:,-1,:].shape, replay_data.actions[:,-1,:].shape)
 
-            if isinstance(self.critic_target, ContinuousCritic_withoutExtractor):
-                # print("critic normal")
-                current_q_values = self.critic(outputRnnDetach, replay_data.actions) # old: hiddenCurrentDetach[-1,:,:]    #todo check detach
-                #print("critic loss:", current_q_values[0].shape, target_q_values.shape)
+            # if isinstance(self.critic_target, ContinuousCritic_withoutExtractor):
+            #     current_q_values = self.critic(outputRnnDetach, replay_data.actions) # old: hiddenCurrentDetach[-1,:,:]
+            #
+            # elif isinstance(self.critic_target, ContinuousCritic):
+            #     current_q_values = self.critic(replay_data.observations, replay_data.actions)
+            #
+            # elif isinstance(self.critic_target, ContinuousCriticRnn):
+            current_q_values = self.critic(replay_data.observations, replay_data.actions)
 
-            elif isinstance(self.critic_target, ContinuousCritic):
-                # print("critic rnn", replay_data.hiddens[-1,:,:].shape, replay_data.actions[:,-1,:].shape)
-                current_q_values = self.critic(replay_data.observations, replay_data.actions)
-
-            elif isinstance(self.critic_target, ContinuousCriticRnn):
-                current_q_values = self.critic(replay_data.observations, replay_data.actions)
-
-            # print("critic loss:\n", current_q_values[0].tolist(), "\n",target_q_values.tolist())
             # Compute critic loss
             critic_loss = 0.5 * sum(F.mse_loss(current_q, target_q_values) for current_q in current_q_values)
             critic_losses.append(critic_loss.item())
 
             # Optimize the critic
             self.critic.optimizer.zero_grad()
-            critic_loss.backward() # todo maybe retain_graph=True
+            critic_loss.backward()
             # f1 = plt.figure(0)
             # plot_grad_flow(self.critic.named_parameters(),"gradiente critic loss")
             self.critic.optimizer.step()
@@ -631,21 +601,15 @@ class SACrnn(OffPolicyAlgorithm):
             # Compute actor loss
             # Alternative: actor_loss = th.mean(log_prob - qf1_pi)
             # Mean over all critic networks
-            if isinstance(self.critic_target, ContinuousCritic_withoutExtractor):
-                # print("critic normal")
-                q_values_pi = th.cat(self.critic(outputRnn, actions_pi), dim=1) # old: hiddenCurrent[-1,:,:],
-            elif isinstance(self.critic_target, ContinuousCritic):
-                # print("critic rnn pi" ,replay_data.hiddens[-1,:,:].shape ,actions_pi.shape)
-                q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
-            elif isinstance(self.critic_target, ContinuousCriticRnn):
-                q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
+            # if isinstance(self.critic_target, ContinuousCritic_withoutExtractor):
+            #     q_values_pi = th.cat(self.critic(outputRnn, actions_pi), dim=1) # old: hiddenCurrent[-1,:,:],
+            # elif isinstance(self.critic_target, ContinuousCritic):
+            #     q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
+            # elif isinstance(self.critic_target, ContinuousCriticRnn):
 
-            #todo chek if correct to detach
-            # q_values_pi = q_values_pi.detach()  #like in line 201 of reccurrent sac
+            q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
 
-            # print("values pi",q_values_pi.shape)
             min_qf_pi, _ = th.min(q_values_pi, dim=1, keepdim=True)
-            # print("actor loss", ent_coef.shape, log_prob.shape, min_qf_pi.shape)
             actor_loss = (ent_coef * log_prob - min_qf_pi).mean()
             actor_losses.append(actor_loss.item())
 
@@ -655,7 +619,6 @@ class SACrnn(OffPolicyAlgorithm):
             # f2 = plt.figure(1)
             # plot_grad_flow(self.actor.named_parameters(),"gradiente actor loss")
             self.actor.optimizer.step()
-            # print("loss actor grad", actor_loss.grad)
             # Update target networks
             if gradient_step % self.target_update_interval == 0:
                 polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.tau)
@@ -670,7 +633,7 @@ class SACrnn(OffPolicyAlgorithm):
         self.logger.record("train/critic_loss", np.mean(critic_losses))
         if len(ent_coef_losses) > 0:
             self.logger.record("train/ent_coef_loss", np.mean(ent_coef_losses))
-        # plt.show()
+
         # input("train end...")
 
     def learn(

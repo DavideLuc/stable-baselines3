@@ -47,21 +47,6 @@ class FlattenExtractor(BaseFeaturesExtractor):
     def forward(self, observations: th.Tensor) -> th.Tensor:
         return self.flatten(observations)
 
-class RNNFlattenExtractor(BaseFeaturesExtractor):
-    """
-    Feature extract that flatten the input.
-    Used as a placeholder when feature extraction is not needed.
-
-    :param observation_space:
-    """
-
-    def __init__(self, observation_space: gym.Space):
-        super().__init__(observation_space, get_flattened_obs_dim(observation_space))
-
-
-    def forward(self, observations: th.Tensor) -> th.Tensor:
-        return observations
-
 
 class NatureCNN(BaseFeaturesExtractor):
     """
@@ -332,28 +317,25 @@ def get_actor_critic_arch(net_arch: Union[List[int], Dict[str, List[int]]]) -> T
     return actor_arch, critic_arch
 
 
-class RNN(nn.Module):
-    def __init__(self, input_size, output_size, hidden_dim, n_layers):
-        super(RNN, self).__init__()
+class RNN(BaseFeaturesExtractor):
+    """
+        Feature extract that flatten the input.
+        Used as a placeholder when feature extraction is not needed.
 
-        self.hidden_dim = hidden_dim
-        # define an RNN with specified parameters
-        # batch_first means that the first dim of the input and output will be the batch_size
-        self.rnn = nn.GRU(input_size, hidden_dim, n_layers, batch_first=True)
+        :param observation_space:
+        """
+    #todo make it working for image
+    def __init__(self, observation_space: gym.Space, hidden_dim, n_layer):
+        super().__init__(observation_space, hidden_dim) # to set hidden_dim for the mlp (self.features_dim set to hidden_dim)
+
+
         #todo add posibility to chose GRU or LSTM
+        self.rnn = nn.GRU(get_flattened_obs_dim(observation_space), hidden_dim, n_layer, batch_first=True)
 
         # self.rnn = nn.LSTM(input_size,hidden_dim,n_layers,batch_first=True)
 
-        self.fc = nn.Linear(hidden_dim, output_size)
 
     def forward(self, x, hidden):
+        output, hidden = self.rnn(x, hidden)
 
-        # get RNN outputs
-        r_out, hidden = self.rnn(x, hidden)
-
-
-        # get final output
-        output = self.fc(r_out[:,-1,:])
-
-        # get final output
         return output, hidden

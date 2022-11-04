@@ -74,7 +74,6 @@ class BaseModel(nn.Module, ABC):
             optimizer_kwargs = {}
 
         if features_extractor_kwargs is None:
-            print("features extractor None")
             features_extractor_kwargs = {}
 
         self.observation_space = observation_space
@@ -85,7 +84,6 @@ class BaseModel(nn.Module, ABC):
         self.optimizer_class = optimizer_class
         self.optimizer_kwargs = optimizer_kwargs
         self.optimizer = None  # type: Optional[th.optim.Optimizer]
-        print(features_extractor_class)
         self.features_extractor_class = features_extractor_class
         self.features_extractor_kwargs = features_extractor_kwargs
 
@@ -128,8 +126,6 @@ class BaseModel(nn.Module, ABC):
         """
         assert self.features_extractor is not None, "No features extractor was set"
         preprocessed_obs = preprocess_obs(obs, self.observation_space, normalize_images=self.normalize_images)
-        # print("preprocessed_obs",self.features_extractor)
-        # print("(extrac feature)preprocessed", preprocessed_obs.shape)
         return self.features_extractor(preprocessed_obs) #usa nn.flatten di default (torch layer line 35)
 
     def _get_constructor_parameters(self) -> Dict[str, Any]:
@@ -335,27 +331,22 @@ class BasePolicy(BaseModel):
         #     episode_start = [False for _ in range(self.n_envs)]
         # Switch to eval mode (this affects batch norm / dropout)
 
-        # print("running predict common policies")
+
         self.set_training_mode(False)
 
         observation, vectorized_env = self.obs_to_tensor(observation)
 
-        # print("(on predict) hidden state:", state, state.shape)
         with th.no_grad():
-            # print("check condition", self.__class__.__name__)
-            if (self.__class__.__name__=='RnnPolicy'): #todo condition for rnn
+            if (self.__class__.__name__=='RnnPolicy'):
                 if state is not None:
                     state = th.as_tensor(state).to(self.device)
                 actions,state = self._predict(observation, state, deterministic=deterministic) #call the forward of actor
                 state = state.cpu().numpy()
-                # print("shape state", state.shape)
             else:
                 actions = self._predict(observation, deterministic=deterministic)
-        # print("predict done\n")
         # Convert to numpy, and reshape to the original action shape
         actions = actions.cpu().numpy().reshape((-1,) + self.action_space.shape)
 
-        #todo (reshape hidden state è fatto su sample del buffer)
 
         if isinstance(self.action_space, gym.spaces.Box):
             if self.squash_output:
@@ -897,16 +888,13 @@ class ContinuousCritic(BaseModel):
             self.q_networks.append(q_net)
 
     def forward(self, obs: th.Tensor, actions: th.Tensor) -> Tuple[th.Tensor, ...]:
-        # print("forward continuos critic (common policy)")
         # Learn the features extractor using the policy loss only
         # when the features_extractor is shared with the actor
         with th.set_grad_enabled(not self.share_features_extractor):
             features = self.extract_features(obs)
-        # print("feature e action shape:",features.shape,actions.shape)
+
         qvalue_input = th.cat([features, actions], dim=1)
-        # print("q_value_input shape:", qvalue_input.shape)
-        # for q_net in self.q_networks:
-            # print("q_net forward is:", q_net(qvalue_input).shape)
+
         return tuple(q_net(qvalue_input) for q_net in self.q_networks)
 
     def q1_forward(self, obs: th.Tensor, actions: th.Tensor) -> th.Tensor:
@@ -954,8 +942,6 @@ class ContinuousCriticRnn(BaseModel):
         net_arch: List[int],
         features_extractor: nn.Module,
         features_dim: int,
-        hidden_dim: int,
-        n_layer: int,
         activation_fn: Type[nn.Module] = nn.ReLU,
         normalize_images: bool = True,
         n_critics: int = 2,
@@ -972,94 +958,20 @@ class ContinuousCriticRnn(BaseModel):
         self.share_features_extractor = share_features_extractor
         self.n_critics = n_critics
         self.q_networks = []
-        self.neural = nn.GRU(features_dim,hidden_dim,n_layer, batch_first=True)
-        for idx in range(n_critics):
-            q_net = create_mlp(hidden_dim + action_dim, 1, net_arch, activation_fn)
-            q_net = nn.Sequential(*q_net)
-            self.add_module(f"qf{idx}", q_net)
-            self.q_networks.append(q_net)
 
-    def forward(self, obs: th.Tensor, actions: th.Tensor) -> Tuple[th.Tensor, ...]: #todo check hidden
-        # print("forward RnnCritic (common policy)")
-        # Learn the features extractor using the policy loss only
-        # when the features_extractor is shared with the actor
-        with th.set_grad_enabled(not self.share_features_extractor):
-            features, hiddenNotUsed = self.neural(obs,None) # todo change... hidden layer is none
-        # print("feature e action shape:",features[:,-1,:].shape,actions.shape)
-        qvalue_input = th.cat([features[:,-1,:], actions], dim=1)
-        # print("q_value_input shape:",qvalue_input.shape)
-        # for q_net in self.q_networks:
-        #     print("q_net forward is:", q_net(qvalue_input,None)[0].shape)
-        return tuple(q_net(qvalue_input) for q_net in self.q_networks)
-
-
-class ContinuousCritic_withoutExtractor(BaseModel):
-    """
-    Critic network(s) for DDPG/SAC/TD3.
-    It represents the action-state value function (Q-value function).
-    Compared to A2C/PPO critics, this one represents the Q-value
-    and takes the continuous action as input. It is concatenated with the state
-    and then fed to the network which outputs a single value: Q(s, a).
-    For more recent algorithms like SAC/TD3, multiple networks
-    are created to give different estimates.
-
-    By default, it creates two critic networks used to reduce overestimation
-    thanks to clipped Q-learning (cf TD3 paper).
-
-    :param observation_space: Obervation space
-    :param action_space: Action space
-    :param net_arch: Network architecture
-    :param features_extractor: Network to extract features
-        (a CNN when using images, a nn.Flatten() layer otherwise)
-    :param features_dim: Number of features
-    :param activation_fn: Activation function
-    :param normalize_images: Whether to normalize images or not,
-         dividing by 255.0 (True by default)
-    :param n_critics: Number of critic networks to create.
-    :param share_features_extractor: Whether the features extractor is shared or not
-        between the actor and the critic (this saves computation time)
-    """
-
-    def __init__(
-        self,
-        observation_space: gym.spaces.Space,
-        action_space: gym.spaces.Space,
-        net_arch: List[int],
-        features_extractor: nn.Module,
-        features_dim: int,
-        activation_fn: Type[nn.Module] = nn.ReLU,
-        normalize_images: bool = True,
-        n_critics: int = 2,
-        share_features_extractor: bool = True,
-    ):
-        super().__init__(
-            observation_space,
-            action_space,
-            features_extractor=features_extractor,
-            normalize_images=normalize_images,
-        )
-
-        action_dim = get_action_dim(self.action_space)
-        # print("critic dim:", features_dim)
-        self.share_features_extractor = share_features_extractor
-        self.n_critics = n_critics
-        self.q_networks = []
         for idx in range(n_critics):
             q_net = create_mlp(features_dim + action_dim, 1, net_arch, activation_fn)
             q_net = nn.Sequential(*q_net)
             self.add_module(f"qf{idx}", q_net)
             self.q_networks.append(q_net)
 
-    def forward(self, obs: th.Tensor, actions: th.Tensor) -> Tuple[th.Tensor, ...]:
-        # print("forward continuos critic (common policy)")
+    def forward(self, obs: th.Tensor, actions: th.Tensor) -> Tuple[th.Tensor, ...]: #todo add hidden
+
         # Learn the features extractor using the policy loss only
         # when the features_extractor is shared with the actor
         with th.set_grad_enabled(not self.share_features_extractor):
-            features = obs #todo check if need a feature extractor
-        # print("feature e action shape:",features.shape,actions.shape)
-        qvalue_input = th.cat([features, actions], dim=1)
-        # print("q_value_input shape:", qvalue_input.shape)
-        # for q_net in self.q_networks:
-            # print("q_net forward is:", q_net(qvalue_input).shape)
+            features, hiddenNotUsed = self.features_extractor(obs,None) # todo change... hidden layer is none
+        qvalue_input = th.cat([features[:,-1,:], actions], dim=1) #selected only the last one of sequence
         return tuple(q_net(qvalue_input) for q_net in self.q_networks)
+
 

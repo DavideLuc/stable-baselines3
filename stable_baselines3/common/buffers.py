@@ -882,7 +882,7 @@ class ReplayBufferExt(ReplayBuffer):
                 )
         self.hidden_dim = hidden_dim
         self.n_layer = n_layer
-        self.hiddens = np.zeros((self.buffer_size, self.n_layer, self.hidden_dim), dtype=np.float32) #todo parametrizzare le dimensioni
+        self.hiddens = np.zeros((self.buffer_size, self.n_layer, self.hidden_dim), dtype=np.float32)
         self.seq_length = seq_length
 
     def add(
@@ -919,7 +919,6 @@ class ReplayBufferExt(ReplayBuffer):
         self.dones[self.pos] = np.array(done).copy()
         if hidden is not None :
             self.hiddens[self.pos] = np.array(hidden).copy()  #todo, correct add hidden to buffer only if not none and else leave zero?
-        # print("hiddens in add:",self.pos,"\n", hidden)
         if self.handle_timeout_termination:
             self.timeouts[self.pos] = np.array([info.get("TimeLimit.truncated", False) for info in infos])
 
@@ -927,14 +926,7 @@ class ReplayBufferExt(ReplayBuffer):
         if self.pos == self.buffer_size:
             self.full = True
             self.pos = 0
-        # f3 = open("hiddenSampleBuffer.txt", "a")
-        # np.set_printoptions(threshold=100000)
-        # print("adding on pos", self.pos, file=f3)
-        # print("obs\n", obs, file=f3)
-        # # print("next obs\n", next_obs, file=f3)
-        # print("hidden ", hidden, file=f3)
-        # print("_______________________ \n", file=f3)
-        # f3.close()
+
 
     def sample(self, batch_size: int, env: Optional[VecNormalize] = None) -> ReplayBufferSamples:
         """
@@ -958,9 +950,7 @@ class ReplayBufferExt(ReplayBuffer):
         # (we use only one array to store `obs` and `next_obs`)
         if self.full:
             batch_inds = (np.random.randint(self.seq_length, self.buffer_size, size=batch_size) + self.pos) % self.buffer_size
-            # print("_____________\tindice batch full",batch_inds)
         else:
-            # print("indice batch ok")
             batch_inds = np.random.randint(self.seq_length-1, self.pos, size=batch_size)
         return self._get_samples(batch_inds, env=env)
 
@@ -977,7 +967,6 @@ class ReplayBufferExt(ReplayBuffer):
 
         range_batch_inds, reshaped_env_inds=self.extract_sample_seq(batch_inds,env_indices)
 
-        # print(range_batch_inds, "\n", range_batch_inds+1)
         data = (
             self._normalize_obs(self.observations[range_batch_inds, reshaped_env_inds, :], env),
             self.actions[batch_inds, env_indices, :], #only the last action
@@ -988,27 +977,15 @@ class ReplayBufferExt(ReplayBuffer):
             # deactivated by default (timeouts is initialized as an array of False)
             (self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
             self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
-            self.hiddens[range_batch_inds[:,0]].reshape(self.n_layer,len(batch_inds),self.hidden_dim), # todo capire cosa estrarre
+            self.hiddens[range_batch_inds[:,0]].reshape(self.n_layer,len(batch_inds),self.hidden_dim),
         )
-        # f3 = open("hiddenSampleBuffer.txt", "a")
-        # # np.set_printoptions(threshold=100000)
-        # print("ind hidden", range_batch_inds[:,0], file=f3)
-        # # print("batch inds \n", batch_inds, file=f3)
-        # # print("data \n", data, file=f3)
-        # # # print("all hidden ",self.hiddens.shape,"\n",np.array_str(self.hiddens.reshape(-1,5)),file=f3)
-        # # # print("hidden ind_subtrac\n",np.array_str(self.hiddens[batch_inds-self.seq_length].reshape(-1,5)),file=f3)
-        # # print("_______________________ \n",file=f3)
-        # f3.close()
-
         return ReplayBufferSamplesExt(*tuple(map(self.to_torch, data)))
 
     def extract_sample_seq(self,batch_inds: np.ndarray, env_inds: np.ndarray) -> np.ndarray:
-        # print("batch_inds: ",batch_inds.shape)
 
         range_batch_inds= np.ndarray(shape= (len(batch_inds),self.seq_length), dtype=np.int)
         reshaped_env_inds = np.ndarray(shape=(len(env_inds), self.seq_length), dtype=np.int)
         added_range_batch_inds= np.ndarray(shape= (len(batch_inds),self.seq_length), dtype=np.int)
-        # print("range: ",range_batch_inds.shape)
         i = 0
         for seq_ind in batch_inds:
             seq_range=np.arange((seq_ind - self.seq_length)+1, seq_ind+1)
@@ -1016,11 +993,6 @@ class ReplayBufferExt(ReplayBuffer):
 
             #todo check the condition after 'and'
             while (True in self.dones[seq_range[:-1],temp_env_ind] and (self.seq_length-2 < self.pos - 1)): #seq_range[:-1]
-                # print("condition:", seq_range, self.dones[seq_range[:-1],temp_env_ind])
-                # print("looping to avoid done in sequence")
-                # print("before buffer", seq_ind, seq_range)
-                # print("done ind: ", seq_range,temp_env_ind)
-                # ind = np.random.randint(self.seq_length-1, self.pos)
 
                 if self.full:
                     ind = (np.random.randint(self.seq_length, self.buffer_size) + self.pos) % self.buffer_size
@@ -1032,25 +1004,9 @@ class ReplayBufferExt(ReplayBuffer):
                 #aggiorno indici dati in input
                 batch_inds[i] = ind
                 env_inds[i] = temp_env_ind
-                # print("looping",ind, seq_range)
-                # input("check in update ind....")
 
 
             range_batch_inds[i]=seq_range
             reshaped_env_inds[i] = np.repeat(temp_env_ind, self.seq_length)
             i +=1
-
-
-        # print("dones", self.dones.shape)
-        # print("obs", self.next_observations.shape)
-        #print("range:",range_batch_inds,"\n added:",added_range_batch_inds)
-
-        # f3 = open("ext_output.txt", "a")
-        # # print("obs \n", self.next_observations.tolist(), file=f3)
-        # # print("ranges \n", range_batch_inds.tolist(), file=f3)
-        # print("extracted \n",self.next_observations[range_batch_inds, reshaped_env_inds, :].tolist(),file=f3)
-        # print("____________",file=f3)
-        # f3.close()
-
-
         return range_batch_inds, reshaped_env_inds
