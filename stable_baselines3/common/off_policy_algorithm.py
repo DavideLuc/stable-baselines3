@@ -16,7 +16,7 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.buffers import DictReplayBuffer, ReplayBuffer, ReplayBufferExt
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.noise import ActionNoise, VectorizedActionNoise
-from stable_baselines3.common.policies import BasePolicy
+from stable_baselines3.common.policies import BasePolicy, BaseModel
 from stable_baselines3.common.save_util import load_from_pkl, save_to_pkl
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, RolloutReturn, Schedule, TrainFreq, TrainFrequencyUnit
 from stable_baselines3.common.utils import safe_mean, should_collect_more_steps
@@ -414,10 +414,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # we assume that the policy uses tanh to scale the action
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
             if (self.__class__.__name__ == 'SACrnn'):
-                # print("critic hidden before:\n",hidden_critic)
-                unscaled_action,self.hiddenStateActor, self.hiddenStateCritic = self.predict(self._last_obs, hidden, hidden_critic, deterministic=False) #call the common policy predict
-                # print("critic hidden after:\n", self.hiddenStateCritic)
-                # self.policy._predictCritic() #todo move critic hidden outside predict
+                unscaled_action,self.hiddenStateActor = self.predict(self._last_obs, hidden, deterministic=False) #call the common policy predict
             else:
                 unscaled_action,_ = self.predict(self._last_obs, deterministic=False)
 
@@ -437,6 +434,20 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # Discrete case, no need to normalize or clip
             buffer_action = unscaled_action
             action = buffer_action
+
+        if (self.__class__.__name__ == 'SACrnn'):
+            # manage hidden critic
+            with th.no_grad():
+                if hidden_critic is not None:
+                    hidden_critic = th.as_tensor(hidden_critic).to(self.device)
+
+                observation, vectorized_env = BaseModel.obs_to_tensor(self,observation=self._last_obs)
+                action_for_critic = th.as_tensor(action).to(self.device)
+
+                # print("critic hidden before:\n",hidden_critic)
+                critic_state = self.policy._predictCritic(observation, action_for_critic, hidden_critic)
+                self.hiddenStateCritic = critic_state.cpu().numpy()
+                # print("critic hidden after:\n", self.hiddenStateCritic)
 
         return action, buffer_action
 

@@ -322,7 +322,6 @@ class BasePolicy(BaseModel):
         self,
         observation: Union[np.ndarray, Dict[str, np.ndarray]],
         state: Optional[Tuple[np.ndarray, ...]] = None,
-        state_critic: Optional[Tuple[np.ndarray, ...]] = None,
         episode_start: Optional[np.ndarray] = None,
         deterministic: bool = False,
     ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
@@ -376,21 +375,7 @@ class BasePolicy(BaseModel):
         if not vectorized_env:
             actions = actions.squeeze(axis=0)
 
-        #costruct hidden critic
-        with th.no_grad():
-            if (self.__class__.__name__=='RnnPolicy'):
-                if state_critic is not None:
-                    state_critic = th.as_tensor(state_critic).to(self.device)
-
-                #todo change none with state critic
-                action_for_critic = th.as_tensor(actions).to(self.device)
-                critic_state = self._predictCritic(observation,action_for_critic,state_critic) #call the forward of critic
-                critic_state = critic_state.cpu().numpy()
-
-        if (self.__class__.__name__ == 'RnnPolicy'):
-            return actions, state, critic_state
-        else:
-            return actions,state
+        return actions,state
 
     def scale_action(self, action: np.ndarray) -> np.ndarray:
         """
