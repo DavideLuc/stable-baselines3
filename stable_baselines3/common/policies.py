@@ -301,13 +301,28 @@ class BasePolicy(BaseModel):
 
         :param observation:
         :param deterministic: Whether to use stochastic or deterministic actions
-        :return: Taken action according to the policy
+        :return: Taken action according to the policy and hidden state Actor
         """
+
+
+    def _predictCritic(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
+        """
+        Get the action according to the policy for a given observation.
+
+        By default provides a dummy implementation -- not all BasePolicy classes
+        implement this, e.g. if they are a Critic in an Actor-Critic method.
+
+        :param observation:
+        :param deterministic: Whether to use stochastic or deterministic actions
+        :return: Q-value according to the policy and hidden state Critic
+        """
+        pass
 
     def predict(
         self,
         observation: Union[np.ndarray, Dict[str, np.ndarray]],
         state: Optional[Tuple[np.ndarray, ...]] = None,
+        state_critic: Optional[Tuple[np.ndarray, ...]] = None,
         episode_start: Optional[np.ndarray] = None,
         deterministic: bool = False,
     ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
@@ -361,7 +376,21 @@ class BasePolicy(BaseModel):
         if not vectorized_env:
             actions = actions.squeeze(axis=0)
 
-        return actions, state
+        #costruct hidden critic
+        with th.no_grad():
+            if (self.__class__.__name__=='RnnPolicy'):
+                if state_critic is not None:
+                    state_critic = th.as_tensor(state_critic).to(self.device)
+
+                #todo change none with state critic
+                action_for_critic = th.as_tensor(actions).to(self.device)
+                critic_state = self._predictCritic(observation,action_for_critic,state_critic) #call the forward of critic
+                critic_state = critic_state.cpu().numpy()
+
+        if (self.__class__.__name__ == 'RnnPolicy'):
+            return actions, state, critic_state
+        else:
+            return actions,state
 
     def scale_action(self, action: np.ndarray) -> np.ndarray:
         """
@@ -965,13 +994,24 @@ class ContinuousCriticRnn(BaseModel):
             self.add_module(f"qf{idx}", q_net)
             self.q_networks.append(q_net)
 
-    def forward(self, obs: th.Tensor, actions: th.Tensor) -> Tuple[th.Tensor, ...]: #todo add hidden
+    def forward(self, obs: th.Tensor, actions: th.Tensor, hidden: th.Tensor) -> Tuple[th.Tensor, ...]:
 
         # Learn the features extractor using the policy loss only
         # when the features_extractor is shared with the actor
         with th.set_grad_enabled(not self.share_features_extractor):
-            features, hiddenNotUsed = self.features_extractor(obs,None) # todo change... hidden layer is none
+            features, hiddenCritic = self.features_extractor(obs,hidden)
         qvalue_input = th.cat([features[:,-1,:], actions], dim=1) #selected only the last one of sequence
-        return tuple(q_net(qvalue_input) for q_net in self.q_networks)
+        return tuple(q_net(qvalue_input) for q_net in self.q_networks), hiddenCritic
 
+    def forwardNotSeq(self, obs: th.Tensor, actions: th.Tensor, hidden: th.Tensor) -> Tuple[th.Tensor, ...]:
+
+        # Learn the features extractor using the policy loss only
+        # when the features_extractor is shared with the actor
+        with th.set_grad_enabled(not self.share_features_extractor):
+            features, hiddenCritic = self.features_extractor(obs,hidden)
+        # qvalue_input = th.cat([features[:,-1,:], actions], dim=1) #selected only the last one of sequence
+        # return tuple(q_net(qvalue_input) for q_net in self.q_networks), hiddenCritic
+
+        # qvalue_input = th.cat([features, actions], dim=1)  # selected only the last one of sequence
+        return hiddenCritic
 

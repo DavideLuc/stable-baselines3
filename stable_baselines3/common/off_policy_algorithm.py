@@ -308,7 +308,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             pos = (replay_buffer.pos - 1) % replay_buffer.buffer_size
             replay_buffer.dones[pos] = True
         if self.replay_buffer_kwargs !={}:
-            self.hiddenState = np.zeros((self.replay_buffer_kwargs["n_layer"], self.replay_buffer_kwargs["hidden_dim"]), dtype=np.float32)
+            self.hiddenStateActor = np.zeros((self.replay_buffer_kwargs["n_layer"], self.replay_buffer_kwargs["hidden_dim"]), dtype=np.float32)
+            self.hiddenStateCritic = np.zeros((self.replay_buffer_kwargs["n_layer"], self.replay_buffer_kwargs["hidden_dim"]), dtype=np.float32)
 
         return super()._setup_learn(
             total_timesteps,
@@ -385,7 +386,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         learning_starts: int,
         action_noise: Optional[ActionNoise] = None,
         n_envs: int = 1,
-        hidden: th.Tensor = None
+        hidden: th.Tensor = None,
+        hidden_critic:  th.Tensor = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Sample an action according to the exploration policy.
@@ -412,7 +414,10 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             # we assume that the policy uses tanh to scale the action
             # We use non-deterministic action in the case of SAC, for TD3, it does not matter
             if (self.__class__.__name__ == 'SACrnn'):
-                unscaled_action,self.hiddenState = self.predict(self._last_obs, hidden, deterministic=False) #call the common policy predict
+                # print("critic hidden before:\n",hidden_critic)
+                unscaled_action,self.hiddenStateActor, self.hiddenStateCritic = self.predict(self._last_obs, hidden, hidden_critic, deterministic=False) #call the common policy predict
+                # print("critic hidden after:\n", self.hiddenStateCritic)
+                # self.policy._predictCritic() #todo move critic hidden outside predict
             else:
                 unscaled_action,_ = self.predict(self._last_obs, deterministic=False)
 
@@ -472,7 +477,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         reward: np.ndarray,
         dones: np.ndarray,
         infos: List[Dict[str, Any]],
-        hidden: th.Tensor = None,
+        hidden_actor: th.Tensor = None,
+        hidden_critic: th.Tensor = None,
     ) -> None:
         """
         Store transition in the replay buffer.
@@ -524,7 +530,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 reward_,
                 dones,
                 infos,
-                hidden
+                hidden_actor,
+                hidden_critic
             )
         else:
             replay_buffer.add(
@@ -599,7 +606,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
             # Select action randomly or according to policy
             if (self.__class__.__name__ == 'SACrnn'):
-                actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs,self.hiddenState)
+                actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs, self.hiddenStateActor, self.hiddenStateCritic)
             else:
                 actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs)
 
@@ -620,7 +627,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
             # Store data in replay buffer (normalized action and unnormalized observation)
             if isinstance(self.replay_buffer, ReplayBufferExt):
-                self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos,hidden=self.hiddenState)
+                self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos, hidden_actor=self.hiddenStateActor, hidden_critic=self.hiddenStateCritic)
             else:
                 self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos)
 
@@ -648,6 +655,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                         # matplotlib.pyplot.show() # todo remove plot
 
                     if (self.__class__.__name__ == 'SACrnn'):
-                        self.hiddenState= None
+                        self.hiddenStateActor= None
+                        self.hiddenStateCritic= None
         callback.on_rollout_end()
         return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training)

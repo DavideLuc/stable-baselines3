@@ -463,6 +463,7 @@ class SACrnn(OffPolicyAlgorithm):
         if _init_setup_model:
             self._setup_model()
 
+
     def _setup_model(self) -> None:
         super()._setup_model()
         self._create_aliases()
@@ -527,9 +528,7 @@ class SACrnn(OffPolicyAlgorithm):
 
             # Action by the current actor for the sampled state
 
-            (actions_pi, log_prob), hiddenCurrent = self.actor.action_log_prob(replay_data.observations,replay_data.hiddens)
-            hiddenCurrentDetach = hiddenCurrent.detach()
-
+            (actions_pi, log_prob), _ = self.actor.action_log_prob(replay_data.observations,replay_data.hiddensActor)
 
 
             log_prob = log_prob.reshape(-1, 1)
@@ -557,7 +556,7 @@ class SACrnn(OffPolicyAlgorithm):
             with th.no_grad():
 
                 # Select action according to policy
-                (next_actions, next_log_prob), _ = self.actor.action_log_prob(replay_data.next_observations, hiddenCurrentDetach)
+                (next_actions, next_log_prob), _ = self.actor.action_log_prob(replay_data.next_observations, replay_data.next_hiddensActor)
 
                 # Compute the next Q values: min over all critics targets
                 # if isinstance(self.critic_target,ContinuousCritic_withoutExtractor):
@@ -567,7 +566,8 @@ class SACrnn(OffPolicyAlgorithm):
                 #     next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
                 #
                 # elif isinstance(self.critic_target, ContinuousCriticRnn):
-                next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
+                critic_target, hiddenCriticTarget = self.critic_target(replay_data.next_observations, next_actions, replay_data.next_hiddensCritic)
+                next_q_values = th.cat(critic_target, dim=1)
 
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
                 # add entropy term
@@ -585,8 +585,7 @@ class SACrnn(OffPolicyAlgorithm):
             #     current_q_values = self.critic(replay_data.observations, replay_data.actions)
             #
             # elif isinstance(self.critic_target, ContinuousCriticRnn):
-            current_q_values = self.critic(replay_data.observations, replay_data.actions)
-
+            current_q_values, hiddenCriticCurrent = self.critic(replay_data.observations, replay_data.actions, replay_data.hiddensCritic) #call common/policies critic rnn forward
             # Compute critic loss
             critic_loss = 0.5 * sum(F.mse_loss(current_q, target_q_values) for current_q in current_q_values)
             critic_losses.append(critic_loss.item())
@@ -606,8 +605,8 @@ class SACrnn(OffPolicyAlgorithm):
             # elif isinstance(self.critic_target, ContinuousCritic):
             #     q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
             # elif isinstance(self.critic_target, ContinuousCriticRnn):
-
-            q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
+            critic_pi, hiddenCriticPi = self.critic(replay_data.observations, actions_pi, replay_data.hiddensCritic)
+            q_values_pi = th.cat(critic_pi, dim=1)
 
             min_qf_pi, _ = th.min(q_values_pi, dim=1, keepdim=True)
             actor_loss = (ent_coef * log_prob - min_qf_pi).mean()

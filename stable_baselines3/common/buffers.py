@@ -882,7 +882,8 @@ class ReplayBufferExt(ReplayBuffer):
                 )
         self.hidden_dim = hidden_dim
         self.n_layer = n_layer
-        self.hiddens = np.zeros((self.buffer_size, self.n_layer, self.hidden_dim), dtype=np.float32)
+        self.hiddensActor = np.zeros((self.buffer_size, self.n_layer, self.hidden_dim), dtype=np.float32)
+        self.hiddensCritic = np.zeros((self.buffer_size, self.n_layer, self.hidden_dim), dtype=np.float32)
         self.seq_length = seq_length
 
     def add(
@@ -893,7 +894,8 @@ class ReplayBufferExt(ReplayBuffer):
         reward: np.ndarray,
         done: np.ndarray,
         infos: List[Dict[str, Any]],
-        hidden: np.ndarray
+        hiddenActor: np.ndarray,
+        hiddenCritic: np.ndarray
     ) -> None:
 
         # Reshape needed when using multiple envs with discrete observations
@@ -917,8 +919,12 @@ class ReplayBufferExt(ReplayBuffer):
         self.actions[self.pos] = np.array(action).copy()
         self.rewards[self.pos] = np.array(reward).copy()
         self.dones[self.pos] = np.array(done).copy()
-        if hidden is not None :
-            self.hiddens[self.pos] = np.array(hidden).copy()  #todo, correct add hidden to buffer only if not none and else leave zero?
+        if hiddenActor is not None :
+            self.hiddensActor[self.pos] = np.array(hiddenActor).copy()  #todo, correct add hidden to buffer only if not none and else leave zero?
+
+        if hiddenCritic is not None :
+            self.hiddensCritic[self.pos] = np.array(hiddenCritic).copy()  #todo, correct add hidden to buffer only if not none and else leave zero?
+
         if self.handle_timeout_termination:
             self.timeouts[self.pos] = np.array([info.get("TimeLimit.truncated", False) for info in infos])
 
@@ -926,7 +932,13 @@ class ReplayBufferExt(ReplayBuffer):
         if self.pos == self.buffer_size:
             self.full = True
             self.pos = 0
-
+        # f = open("addBufferCritic.txt", "a")
+        # np.set_printoptions(threshold=10000)
+        # print(next_obs, file=f)
+        # print(hiddenActor, file=f)
+        # print(hiddenCritic, file=f)
+        # print("_____", file=f)
+        # f.close()
 
     def sample(self, batch_size: int, env: Optional[VecNormalize] = None) -> ReplayBufferSamples:
         """
@@ -977,8 +989,24 @@ class ReplayBufferExt(ReplayBuffer):
             # deactivated by default (timeouts is initialized as an array of False)
             (self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
             self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
-            self.hiddens[range_batch_inds[:,0]].reshape(self.n_layer,len(batch_inds),self.hidden_dim),
+            self.hiddensActor[range_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),
+            self.hiddensActor[range_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim), # next hidden actor
+            self.hiddensCritic[range_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),
+            self.hiddensCritic[range_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim), # next hidden critic
         )
+
+        # f=open("sampleBufferHiddenCritic", "a")
+        # np.set_printoptions(threshold=10000)
+        # print(self.observations[range_batch_inds[:,:], reshaped_env_inds[:,:], :],file=f)
+        # print(self.hiddensActor[range_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
+        # print(self.hiddensCritic[range_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
+        # print("next",file=f)
+        # print(self.next_observations[range_batch_inds[:, :], reshaped_env_inds[:, :], :], file=f)
+        # print(self.hiddensActor[range_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
+        # print(self.hiddensCritic[range_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
+        # print("____",file=f)
+        # f.close()
+        # print(range_batch_inds[:, 0],range_batch_inds[:, 1])
         return ReplayBufferSamplesExt(*tuple(map(self.to_torch, data)))
 
     def extract_sample_seq(self,batch_inds: np.ndarray, env_inds: np.ndarray) -> np.ndarray:
@@ -1010,3 +1038,4 @@ class ReplayBufferExt(ReplayBuffer):
             reshaped_env_inds[i] = np.repeat(temp_env_ind, self.seq_length)
             i +=1
         return range_batch_inds, reshaped_env_inds
+

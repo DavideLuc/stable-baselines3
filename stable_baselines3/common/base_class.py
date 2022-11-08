@@ -561,6 +561,7 @@ class BaseAlgorithm(ABC):
         self,
         observation: np.ndarray,
         state: Optional[Tuple[np.ndarray, ...]] = None,
+        state_critic: Optional[Tuple[np.ndarray, ...]] = None,
         episode_start: Optional[np.ndarray] = None,
         deterministic: bool = False,
     ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
@@ -577,7 +578,7 @@ class BaseAlgorithm(ABC):
         :return: the model's action and the next hidden state
             (used in recurrent policies)
         """
-        return self.policy.predict(observation, state, episode_start, deterministic)
+        return self.policy.predict(observation, state, state_critic, episode_start, deterministic)
 
     def set_random_seed(self, seed: Optional[int] = None) -> None:
         """

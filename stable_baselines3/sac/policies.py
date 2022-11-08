@@ -894,8 +894,10 @@ class RnnPolicy(BasePolicy):
         return self._predict(obs, state=hidden, deterministic=deterministic)
 
     def _predict(self, observation: th.Tensor, hidden: th.Tensor, deterministic: bool = False) -> th.Tensor:
-        #return self.actor(observation, state=state, deterministic=deterministic)
         return self.actor(observation, hidden, deterministic=deterministic) #call forward of RnnActor
+
+    def _predictCritic(self, observation: th.Tensor, action: th.Tensor, hidden: th.Tensor) -> th.Tensor:
+        return self.critic.forwardNotSeq(observation, action, hidden) #call forwardNotSeq of Critic
 
     def set_training_mode(self, mode: bool) -> None:
         """
