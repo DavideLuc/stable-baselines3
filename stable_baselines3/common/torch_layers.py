@@ -336,6 +336,9 @@ class RNN(BaseFeaturesExtractor):
 
 
     def forward(self, x, hidden):
+        if is_image_space(x):
+            print("non implementato per immagini")
+
         output, hidden = self.rnn(x, hidden)
 
         return output, hidden

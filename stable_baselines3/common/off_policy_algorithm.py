@@ -404,7 +404,6 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             and scaled action that will be stored in the replay buffer.
             The two differs when the action space is not normalized (bounds are not [-1, 1]).
         """
-
         # Select action randomly or according to policy
         if self.num_timesteps < learning_starts and not (self.use_sde and self.use_sde_at_warmup):
             # Warmup phase
@@ -435,8 +434,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             buffer_action = unscaled_action
             action = buffer_action
 
-        if (self.__class__.__name__ == 'SACrnn'):
-            # manage hidden critic
+        # create the hidden state for critic
+        if (self.__class__.__name__ == 'SACrnn') and self.num_timesteps > learning_starts:
             with th.no_grad():
                 if hidden_critic is not None:
                     hidden_critic = th.as_tensor(hidden_critic).to(self.device)
@@ -444,10 +443,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 observation, vectorized_env = BaseModel.obs_to_tensor(self,observation=self._last_obs)
                 action_for_critic = th.as_tensor(action).to(self.device)
 
-                # print("critic hidden before:\n",hidden_critic)
                 critic_state = self.policy._predictCritic(observation, action_for_critic, hidden_critic)
                 self.hiddenStateCritic = critic_state.cpu().numpy()
-                # print("critic hidden after:\n", self.hiddenStateCritic)
 
         return action, buffer_action
 

@@ -655,8 +655,10 @@ class ActorRnn(BasePolicy):
             Mean, standard deviation and optional keyword arguments.
         """
         #todo recurrentNet(problem with image)
-        features,hidden = self.features_extractor(obs,hidden)#self.recurrentNet(obs, hidden) #forward di rete riccorrente
 
+        # print("actor get_action obs", obs.shape)
+        features,hidden = self.features_extractor(obs,hidden)#self.recurrentNet(obs, hidden) #forward di rete riccorrente
+        # print("actor get_action features", features.shape)
         latent_pi = self.latent_pi(features)
         mean_actions = self.mu(latent_pi)
 

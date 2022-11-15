@@ -314,7 +314,7 @@ class BasePolicy(BaseModel):
 
         :param observation:
         :param deterministic: Whether to use stochastic or deterministic actions
-        :return: Q-value according to the policy and hidden state Critic
+        :return: hidden state Critic
         """
         pass
 
@@ -354,7 +354,7 @@ class BasePolicy(BaseModel):
             if (self.__class__.__name__=='RnnPolicy'):
                 if state is not None:
                     state = th.as_tensor(state).to(self.device)
-                actions,state = self._predict(observation, state, deterministic=deterministic) #call the forward of actor
+                actions,state = self._predict(observation, state, deterministic=deterministic) #call the forward of actor (_predict on sac/policies)
                 state = state.cpu().numpy()
             else:
                 actions = self._predict(observation, deterministic=deterministic)
