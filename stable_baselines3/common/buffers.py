@@ -882,8 +882,8 @@ class ReplayBufferExt(ReplayBuffer):
                 )
         self.hidden_dim = hidden_dim
         self.n_layer = n_layer
-        self.hiddensActor = np.zeros((self.buffer_size, self.n_layer, self.hidden_dim), dtype=np.float32)
-        self.hiddensCritic = np.zeros((self.buffer_size, self.n_layer, self.hidden_dim), dtype=np.float32)
+        self.hiddensActor = np.zeros((self.buffer_size, self.n_envs, self.n_layer, self.hidden_dim), dtype=np.float32)
+        self.hiddensCritic = np.zeros((self.buffer_size, self.n_envs, self.n_layer, self.hidden_dim), dtype=np.float32)
         self.seq_length = seq_length
 
     def add(
@@ -977,50 +977,50 @@ class ReplayBufferExt(ReplayBuffer):
         # else:
         #      next_obs = self._normalize_obs(self.next_observations[batch_inds, env_indices, :], env)
 
-        range_batch_inds, reshaped_env_inds=self.extract_sample_seq(batch_inds,env_indices)
+        seq_batch_inds, seq_env_indices=self.extract_sample_seq(batch_inds,env_indices)
 
         data = (
-            self._normalize_obs(self.observations[range_batch_inds, reshaped_env_inds, :], env),
+            self._normalize_obs(self.observations[seq_batch_inds, seq_env_indices, :], env),
             self.actions[batch_inds, env_indices, :], #only the last action
-            #self.actions[range_batch_inds, reshaped_env_inds, :], #sequence of action
+            #self.actions[seq_batch_inds, seq_env_indices, :], #sequence of action
             #self.next_observations[batch_inds, env_indices, :].reshape(batch_inds.size, 1,-1),   # only 1 after
-            self.next_observations[range_batch_inds, reshaped_env_inds, :], #all the sequence translatet by one
+            self.next_observations[seq_batch_inds, seq_env_indices, :], #all the sequence translatet by one
             # Only use dones that are not due to timeouts
             # deactivated by default (timeouts is initialized as an array of False)
             (self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
             self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
-            self.hiddensActor[range_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),
-            self.hiddensActor[range_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim), # next hidden actor
-            self.hiddensCritic[range_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),
-            self.hiddensCritic[range_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim), # next hidden critic
+            self.hiddensActor[seq_batch_inds[:, 0],env_indices].reshape(self.n_layer, len(batch_inds), self.hidden_dim),
+            self.hiddensActor[seq_batch_inds[:, 1],env_indices].reshape(self.n_layer, len(batch_inds), self.hidden_dim), # next hidden actor
+            self.hiddensCritic[seq_batch_inds[:, 0],env_indices].reshape(self.n_layer, len(batch_inds), self.hidden_dim),
+            self.hiddensCritic[seq_batch_inds[:, 1],env_indices].reshape(self.n_layer, len(batch_inds), self.hidden_dim), # next hidden critic
         )
 
         # f=open("sampleBufferHiddenCritic", "a")
         # np.set_printoptions(threshold=10000)
-        # print(self.observations[range_batch_inds[:,:], reshaped_env_inds[:,:], :],file=f)
-        # print(self.hiddensActor[range_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
-        # print(self.hiddensCritic[range_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
+        # print(self.observations[seq_batch_inds[:,:], seq_env_indices[:,:], :],file=f)
+        # print(self.hiddensActor[seq_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
+        # print(self.hiddensCritic[seq_batch_inds[:, 0]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
         # print("next",file=f)
-        # print(self.next_observations[range_batch_inds[:, :], reshaped_env_inds[:, :], :], file=f)
-        # print(self.hiddensActor[range_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
-        # print(self.hiddensCritic[range_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
+        # print(self.next_observations[seq_batch_inds[:, :], seq_env_indices[:, :], :], file=f)
+        # print(self.hiddensActor[seq_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
+        # print(self.hiddensCritic[seq_batch_inds[:, 1]].reshape(self.n_layer, len(batch_inds), self.hidden_dim),file=f)
         # print("____",file=f)
         # f.close()
-        # print(range_batch_inds[:, 0],range_batch_inds[:, 1])
+        # print(seq_batch_inds[:, 0],seq_batch_inds[:, 1])
         return ReplayBufferSamplesExt(*tuple(map(self.to_torch, data)))
 
     def extract_sample_seq(self,batch_inds: np.ndarray, env_inds: np.ndarray) -> np.ndarray:
 
-        range_batch_inds= np.ndarray(shape= (len(batch_inds),self.seq_length), dtype=np.int)
-        reshaped_env_inds = np.ndarray(shape=(len(env_inds), self.seq_length), dtype=np.int)
-        added_range_batch_inds= np.ndarray(shape= (len(batch_inds),self.seq_length), dtype=np.int)
+        seq_batch_inds= np.ndarray(shape= (len(batch_inds),self.seq_length), dtype=np.int)
+        seq_env_indices = np.ndarray(shape=(len(env_inds), self.seq_length), dtype=np.int)
+        # added_range_batch_inds= np.ndarray(shape= (len(batch_inds),self.seq_length), dtype=np.int)
         i = 0
         for seq_ind in batch_inds:
             seq_range=np.arange((seq_ind - self.seq_length)+1, seq_ind+1)
             temp_env_ind= env_inds[i]
 
             #todo check the condition after 'and'
-            while (True in self.dones[seq_range[:-1],temp_env_ind] and (self.seq_length-2 < self.pos - 1)): #seq_range[:-1]
+            while (True in self.dones[seq_range[:-1],temp_env_ind] and (self.seq_length-1 < self.pos)):
 
                 if self.full:
                     ind = (np.random.randint(self.seq_length, self.buffer_size) + self.pos) % self.buffer_size
@@ -1034,8 +1034,8 @@ class ReplayBufferExt(ReplayBuffer):
                 env_inds[i] = temp_env_ind
 
 
-            range_batch_inds[i]=seq_range
-            reshaped_env_inds[i] = np.repeat(temp_env_ind, self.seq_length)
+            seq_batch_inds[i]=seq_range
+            seq_env_indices[i] = np.repeat(temp_env_ind, self.seq_length)
             i +=1
-        return range_batch_inds, reshaped_env_inds
+        return seq_batch_inds, seq_env_indices
 

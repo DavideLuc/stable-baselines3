@@ -117,7 +117,7 @@ class BaseModel(nn.Module, ABC):
         """Helper method to create a features extractor."""
         return self.features_extractor_class(self.observation_space, **self.features_extractor_kwargs)
 
-    def extract_features(self, obs: th.Tensor) -> th.Tensor:
+    def extract_features(self, obs: th.Tensor, hidden: th.Tensor=None) -> th.Tensor:
         """
         Preprocess the observation if needed and extract features.
 
@@ -126,6 +126,8 @@ class BaseModel(nn.Module, ABC):
         """
         assert self.features_extractor is not None, "No features extractor was set"
         preprocessed_obs = preprocess_obs(obs, self.observation_space, normalize_images=self.normalize_images)
+        if isinstance(self.features_extractor, RNN):
+            return self.features_extractor(preprocessed_obs,hidden)
         return self.features_extractor(preprocessed_obs) #usa nn.flatten di default (torch layer line 35)
 
     def _get_constructor_parameters(self) -> Dict[str, Any]:
@@ -984,7 +986,7 @@ class ContinuousCriticRnn(BaseModel):
         # Learn the features extractor using the policy loss only
         # when the features_extractor is shared with the actor
         with th.set_grad_enabled(not self.share_features_extractor):
-            features, hiddenCritic = self.features_extractor(obs,hidden)
+            features, hiddenCritic = self.extract_features(obs,hidden)
         qvalue_input = th.cat([features[:,-1,:], actions], dim=1) #selected only the last one of sequence
         return tuple(q_net(qvalue_input) for q_net in self.q_networks), hiddenCritic
 
@@ -993,7 +995,7 @@ class ContinuousCriticRnn(BaseModel):
         # Learn the features extractor using the policy loss only
         # when the features_extractor is shared with the actor
         with th.set_grad_enabled(not self.share_features_extractor):
-            features, hiddenCritic = self.features_extractor(obs,hidden)
+            features, hiddenCritic = self.extract_features(obs,hidden)
         # qvalue_input = th.cat([features[:,-1,:], actions], dim=1) #selected only the last one of sequence
         # return tuple(q_net(qvalue_input) for q_net in self.q_networks), hiddenCritic
 

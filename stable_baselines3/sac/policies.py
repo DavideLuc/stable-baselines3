@@ -656,9 +656,9 @@ class ActorRnn(BasePolicy):
         """
         #todo recurrentNet(problem with image)
 
-        # print("actor get_action obs", obs.shape)
-        features,hidden = self.features_extractor(obs,hidden)#self.recurrentNet(obs, hidden) #forward di rete riccorrente
-        # print("actor get_action features", features.shape)
+
+        features,hidden = self.extract_features(obs,hidden) # common policy e poi forward di rete riccorrente
+
         latent_pi = self.latent_pi(features)
         mean_actions = self.mu(latent_pi)
 
@@ -679,9 +679,10 @@ class ActorRnn(BasePolicy):
             Mean, standard deviation and optional keyword arguments.
         """
         #todo recurrentNet(problem with image)
-        features, hidden = self.features_extractor(obs,hidden)#self.recurrentNet(obs, hidden) #forward di rete riccorrente
+        features, hidden = self.extract_features(obs, hidden)  # common policy e poi forward di rete riccorrente
+        # features, hidden = self.features_extractor(obs,hidden)#self.recurrentNet(obs, hidden) #forward di rete riccorrente
 
-        features = features[:, -1, :]  # extrac the last of seq todo check if correct
+        features = features[:, -1, :]  # extrac the last of seq for the mlp evaluation
 
         latent_pi=self.latent_pi(features)
         mean_actions = self.mu(latent_pi)
@@ -745,6 +746,7 @@ class RnnPolicy(BasePolicy):
         lr_schedule: Schedule,
         hidden_dim: int,
         n_layer: int,
+        seq_length: int,
         net_arch: Optional[Union[List[int], Dict[str, List[int]]]] = None,
         activation_fn: Type[nn.Module] = nn.ReLU,
         use_sde: bool = False,
@@ -765,6 +767,7 @@ class RnnPolicy(BasePolicy):
         rnn_param = {
             "hidden_dim": hidden_dim,
             "n_layer": n_layer,
+            "seq_length": seq_length
         }
         if features_extractor_kwargs is None:
             features_extractor_kwargs=rnn_param

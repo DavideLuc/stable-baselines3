@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple, Type, Union
 import gym
 import torch as th
 from torch import nn
+import numpy as np
 
 from stable_baselines3.common.preprocessing import get_flattened_obs_dim, is_image_space
 from stable_baselines3.common.type_aliases import TensorDict
@@ -324,21 +325,68 @@ class RNN(BaseFeaturesExtractor):
 
         :param observation_space:
         """
-    #todo make it working for image
-    def __init__(self, observation_space: gym.Space, hidden_dim, n_layer):
+
+    def __init__(self, observation_space: gym.Space, hidden_dim, n_layer, seq_length):
         super().__init__(observation_space, hidden_dim) # to set hidden_dim for the mlp (self.features_dim set to hidden_dim)
+
+        if len(observation_space.shape) >= 3 and observation_space.dtype == np.uint8:
+
+            # We assume CxHxW images (channels first)
+            n_input_channels = observation_space.shape[0]
+            self.H = observation_space.shape[1]
+            self.W = observation_space.shape[2]
+
+
+            self.cnn = nn.Sequential(
+                nn.Conv2d(n_input_channels, 32, kernel_size=8, stride=4, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
+                nn.ReLU(),
+            )
+
+            self.seq_length = seq_length
+
+            self.cnn_seq = nn.Sequential(
+                nn.Conv2d(self.seq_length*3, 32, kernel_size=8, stride=4, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+                nn.ReLU(),
+                nn.Conv2d(64, self.seq_length*64, kernel_size=3, stride=1, padding=0),
+                nn.ReLU(),
+            )
+
+            # Compute shape by doing one forward pass
+            with th.no_grad():
+                sample = (th.as_tensor(observation_space.sample()[None]).float()).reshape(-1, self.H, self.W)
+                features_dim = self.cnn(sample).reshape(-1).shape[0]
+
+
+        else:
+            features_dim = get_flattened_obs_dim(observation_space)
+
 
 
         #todo add posibility to chose GRU or LSTM
-        self.rnn = nn.GRU(get_flattened_obs_dim(observation_space), hidden_dim, n_layer, batch_first=True)
+        self.rnn = nn.GRU(features_dim, hidden_dim, n_layer, batch_first=True)
 
         # self.rnn = nn.LSTM(input_size,hidden_dim,n_layers,batch_first=True)
 
 
     def forward(self, x, hidden):
-        if is_image_space(x):
-            print("non implementato per immagini")
+        if len(x.shape)>3:
+            if len(x.shape) > 4:
+                batch=x.shape[0]
+                x = x.reshape(batch,-1, self.H, self.W)
+                x = self.cnn_seq(x)
+                x = x.reshape(batch,self.seq_length,-1)
+            else:
+                x= x.reshape(-1,self.H,self.W)
+                x = self.cnn(x)
+                x= x.reshape(1,-1)
 
+        # print("input rnn", x.shape)
         output, hidden = self.rnn(x, hidden)
 
         return output, hidden

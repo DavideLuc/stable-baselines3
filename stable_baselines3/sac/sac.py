@@ -421,7 +421,10 @@ class SACrnn(OffPolicyAlgorithm):
         _init_setup_model: bool = True,
     ):
         #parametrization for hidden dimension and sequence length
-        replay_buffer_kwargs.update(policy_kwargs)
+        if policy_kwargs is None:
+            policy_kwargs=replay_buffer_kwargs.copy()
+        else:
+            policy_kwargs.update(replay_buffer_kwargs)
         #parametrization for the output size of rnn
         #policy_kwargs.update({"output_size":batch_size})
         super().__init__(
@@ -671,7 +674,7 @@ class SACrnn(OffPolicyAlgorithm):
             state_dicts.append("ent_coef_optimizer")
         else:
             saved_pytorch_variables = ["ent_coef_tensor"]
-        return state_dicts, saved_pytorch_variable
+        return state_dicts, saved_pytorch_variables
 
 import matplotlib.pyplot as plt
 
