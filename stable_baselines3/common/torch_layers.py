@@ -332,13 +332,13 @@ class RNN(BaseFeaturesExtractor):
         if len(observation_space.shape) >= 3 and observation_space.dtype == np.uint8:
 
             # We assume CxHxW images (channels first)
-            n_input_channels = observation_space.shape[0]
+            self.n_input_channels = observation_space.shape[0]
             self.H = observation_space.shape[1]
             self.W = observation_space.shape[2]
 
 
             self.cnn = nn.Sequential(
-                nn.Conv2d(n_input_channels, 32, kernel_size=8, stride=4, padding=0),
+                nn.Conv2d(self.n_input_channels, 32, kernel_size=8, stride=4, padding=0),
                 nn.ReLU(),
                 nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
                 nn.ReLU(),
@@ -348,14 +348,14 @@ class RNN(BaseFeaturesExtractor):
 
             self.seq_length = seq_length
 
-            self.cnn_seq = nn.Sequential(
-                nn.Conv2d(self.seq_length*3, 32, kernel_size=8, stride=4, padding=0),
-                nn.ReLU(),
-                nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
-                nn.ReLU(),
-                nn.Conv2d(64, self.seq_length*64, kernel_size=3, stride=1, padding=0),
-                nn.ReLU(),
-            )
+            # self.cnn_seq = nn.Sequential(
+            #     nn.Conv2d(self.seq_length*self.n_input_channels, 32, kernel_size=8, stride=4, padding=0),
+            #     nn.ReLU(),
+            #     nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+            #     nn.ReLU(),
+            #     nn.Conv2d(64, self.seq_length*64, kernel_size=3, stride=1, padding=0),
+            #     nn.ReLU(),
+            # )
 
             # Compute shape by doing one forward pass
             with th.no_grad():
@@ -378,8 +378,8 @@ class RNN(BaseFeaturesExtractor):
         if len(x.shape)>3:
             if len(x.shape) > 4:
                 batch=x.shape[0]
-                x = x.reshape(batch,-1, self.H, self.W)
-                x = self.cnn_seq(x)
+                x = x.reshape(-1,self.n_input_channels, self.H, self.W)
+                x = self.cnn(x)
                 x = x.reshape(batch,self.seq_length,-1)
             else:
                 x= x.reshape(-1,self.H,self.W)

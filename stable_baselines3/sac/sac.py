@@ -421,12 +421,12 @@ class SACrnn(OffPolicyAlgorithm):
         _init_setup_model: bool = True,
     ):
         #parametrization for hidden dimension and sequence length
-        if policy_kwargs is None:
-            policy_kwargs=replay_buffer_kwargs.copy()
-        else:
-            policy_kwargs.update(replay_buffer_kwargs)
-        #parametrization for the output size of rnn
-        #policy_kwargs.update({"output_size":batch_size})
+        if replay_buffer_kwargs is not None:
+            if policy_kwargs is None:
+                policy_kwargs=replay_buffer_kwargs.copy()
+            else:
+                policy_kwargs.update(replay_buffer_kwargs)
+
         super().__init__(
             policy,
             env,
