@@ -654,10 +654,11 @@ class ActorRnn(BasePolicy):
         :return:
             Mean, standard deviation and optional keyword arguments.
         """
-        #todo recurrentNet(problem with image)
-
 
         features,hidden = self.extract_features(obs,hidden) # common policy e poi forward di rete riccorrente
+
+        if (len(features.shape)>2): # se sequenza
+            features = features[:, -1, :]  # extrac the last of seq for the mlp evaluation
 
         latent_pi = self.latent_pi(features)
         mean_actions = self.mu(latent_pi)
@@ -670,30 +671,6 @@ class ActorRnn(BasePolicy):
         log_std = th.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
         return mean_actions, log_std, {}, hidden
 
-    def get_action_dist_params_seq(self, obs: th.Tensor, hidden: th.Tensor) -> Tuple[th.Tensor, th.Tensor, Dict[str, th.Tensor]]:
-        """
-        Get the parameters for the action distribution.
-
-        :param obs:
-        :return:
-            Mean, standard deviation and optional keyword arguments.
-        """
-        #todo recurrentNet(problem with image)
-        features, hidden = self.extract_features(obs, hidden)  # common policy e poi forward di rete riccorrente
-        # features, hidden = self.features_extractor(obs,hidden)#self.recurrentNet(obs, hidden) #forward di rete riccorrente
-
-        features = features[:, -1, :]  # extrac the last of seq for the mlp evaluation
-
-        latent_pi=self.latent_pi(features)
-        mean_actions = self.mu(latent_pi)
-
-        if self.use_sde:
-            return mean_actions, self.log_std, dict(latent_sde=latent_pi)
-        # Unstructured exploration (Original implementation)
-        log_std = self.log_std(latent_pi)
-        # Original Implementation to cap the standard deviation
-        log_std = th.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
-        return mean_actions, log_std, {}, hidden
 
     def forward(self, obs: th.Tensor, oldHidden: th.Tensor, deterministic: bool = False) -> th.Tensor:
         mean_actions, log_std, kwargs, hidden = self.get_action_dist_params(obs,oldHidden)
@@ -701,10 +678,11 @@ class ActorRnn(BasePolicy):
         return self.action_dist.actions_from_params(mean_actions, log_std, deterministic=deterministic, **kwargs), hidden
 
     def action_log_prob(self, obs: th.Tensor, oldHidden: th.Tensor) -> Tuple[th.Tensor, th.Tensor]:
-        mean_actions, log_std, kwargs, newHidden = self.get_action_dist_params_seq(obs,oldHidden)
+        mean_actions, log_std, kwargs, newHidden = self.get_action_dist_params(obs,oldHidden)
         return self.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs), newHidden
 
     def _predict(self, observation: th.Tensor, deterministic: bool = False) -> th.Tensor:
+        print("predict actor")
         return self(observation, deterministic)
 
 class RnnPolicy(BasePolicy):

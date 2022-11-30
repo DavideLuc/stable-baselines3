@@ -569,7 +569,7 @@ class SACrnn(OffPolicyAlgorithm):
                 #     next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
                 #
                 # elif isinstance(self.critic_target, ContinuousCriticRnn):
-                critic_target, hiddenCriticTarget = self.critic_target(replay_data.next_observations, next_actions, replay_data.next_hiddensCritic)
+                critic_target, _ = self.critic_target(replay_data.next_observations, next_actions, replay_data.next_hiddensCritic)
                 next_q_values = th.cat(critic_target, dim=1)
 
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)

@@ -330,7 +330,7 @@ class RNN(BaseFeaturesExtractor):
         super().__init__(observation_space, hidden_dim) # to set hidden_dim for the mlp (self.features_dim set to hidden_dim)
 
         if len(observation_space.shape) >= 3 and observation_space.dtype == np.uint8:
-
+            print("extractor with conv")
             # We assume CxHxW images (channels first)
             self.n_input_channels = observation_space.shape[0]
             self.H = observation_space.shape[1]
