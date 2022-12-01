@@ -613,7 +613,8 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 self.actor.reset_noise(env.num_envs)
 
             # Select action randomly or according to policy
-            if (self.__class__.__name__ == 'SACrnn'):
+
+            if isinstance(self.replay_buffer,ReplayBufferExt):
                 actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs, self.hiddenStateActor, self.hiddenStateCritic)
             else:
                 actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs)
